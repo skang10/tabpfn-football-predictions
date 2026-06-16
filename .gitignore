@@ -1,0 +1,5 @@
+results.csv
+predictions_*.csv
+__pycache__/
+*.pyc
+.venv/
