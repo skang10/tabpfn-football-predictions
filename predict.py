@@ -5,13 +5,12 @@ import pandas as pd
 import numpy as np
 from collections import defaultdict
 from sklearn.metrics import accuracy_score, log_loss
-from tabpfn import TabPFNClassifier
+from tabpfn_client import TabPFNClassifier
 
 TODAY = pd.Timestamp.now().normalize()
 TRAIN_START = pd.Timestamp("2014-01-01")
 MAX_TRAIN = 10000
 HOME_ADV = 65.0
-DEVICE = "auto"
 DATA = "results.csv"
 RAW_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
 
@@ -28,6 +27,7 @@ FEATURES = [
 
 
 def importance(t):
+    """Map tournament name to an ELO K-factor weight; higher means bigger rating swings."""
     t = t.lower()
     if "world cup" in t and "qual" not in t:
         return 60.0
@@ -44,6 +44,7 @@ def importance(t):
 
 
 def load_data(refresh=False):
+    """Load and lightly clean the results CSV, downloading it if missing or refresh=True."""
     if refresh or not os.path.exists(DATA):
         df = pd.read_csv(RAW_URL)
         df.to_csv(DATA, index=False)
@@ -69,10 +70,13 @@ def build_features(df):
     last_date, h2h = {}, defaultdict(list)
 
     def team_feats(team):
+        """Return pre-match stats for a team: ELO, form averages, win rate, goal stats, streak, games played.
+        Defaults represent a mid-table team with no history."""
         r = res[team]
         if not r:
             return elo[team], 1.3, 1.3, 0.33, 1.0, 1.0, 0.0, 0.0, 0
         last5, last10 = r[-5:], r[-10:]
+        # each entry is (points, gf, ga, won); walk back until a non-win to count winning streak
         streak = 0
         for p, *_ in reversed(r):
             if p < 1:
@@ -85,6 +89,8 @@ def build_features(df):
                 np.mean([g - a for _, g, a, _ in last10]), streak, len(r))
 
     def h2h_feats(home, away):
+        """Head-to-head record between the two teams, keyed by sorted pair so order doesn't matter.
+        GD is flipped for matches where home was the away side."""
         m = h2h[tuple(sorted((home, away)))]
         if not m:
             return 0, 0.5, 0.25, 0.0
@@ -115,8 +121,10 @@ def build_features(df):
 
         if not np.isnan(r.home_score):
             gd = r.home_score - r.away_score
+            # standard ELO expected score from home's perspective, with home-advantage baked into adj
             exp = 1 / (1 + 10 ** ((ae - he - adj) / 400))
             s = 1.0 if gd > 0 else (0.0 if gd < 0 else 0.5)
+            # goal-difference multiplier (FIFA-style): bigger wins shift ratings more
             g = 1.0 if abs(gd) <= 1 else (1.5 if abs(gd) == 2 else (11 + abs(gd)) / 8)
             delta = r.importance * g * (s - exp)
             elo[h] += delta
@@ -130,12 +138,14 @@ def build_features(df):
 
 
 def train(pool):
-    clf = TabPFNClassifier(device=DEVICE, ignore_pretraining_limits=True, random_state=42)
+    """Fit TabPFN on the feature matrix; ignore_pretraining_limits allows >1000 rows."""
+    clf = TabPFNClassifier(ignore_pretraining_limits=True, random_state=42)
     clf.fit(pool[FEATURES].values, pool["outcome"].values)
     return clf
 
 
 def main():
+    """Backtest on the previous calendar month, then predict all upcoming fixtures."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true", help="Re-download dataset from source")
     args = parser.parse_args()

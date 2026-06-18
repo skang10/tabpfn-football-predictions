@@ -1,8 +1,10 @@
 # TabPFN Football Predictions
 
-Predict international football match outcomes using [TabPFN](https://github.com/PriorLabs/TabPFN). Achieves ~59% accuracy and ~0.86 log-loss on held-out data, better than XGBoost and ELO-only baselines on this task.
+This repository is a template to participate in Prior Labs' [World Cup Game Outcome Prediction competition](https://ux.priorlabs.ai/worldcup). It has a basic script that outputs predictions with a standard prediction template. Use this template to generate predictions. The `predict.py` script should only be a source of inspiration, feel free to fork the repo and add your own ideas.
 
-The model is trained on engineered features: ELO ratings, recent form, head-to-head record, rest days, and tournament importance. Data comes from [martj42/international_results](https://github.com/martj42/international_results), updated daily.
+The script predicts international football match outcomes using [TabPFN](https://github.com/PriorLabs/TabPFN) using the [client repository](https://github.com/PriorLabs/tabpfn-client). It achieves ~59% accuracy and ~0.86 log-loss on held-out data. There is a good margin of progression. We look forward to your submission!
+
+The model is trained on engineered features: ELO ratings, recent form, head-to-head record, rest days, and tournament importance. Data comes from [martj42/international_results](https://github.com/martj42/international_results).
 
 ## Setup
 
