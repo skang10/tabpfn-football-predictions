@@ -1,5 +1,5 @@
 results.csv
-predictions_2*.csv
+predictions/
 __pycache__/
 *.pyc
 .venv/
