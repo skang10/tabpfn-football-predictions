@@ -1,9 +1,12 @@
 """Predict international football fixtures with TabPFN on engineered features."""
 import argparse
+import json
 import os
+import subprocess
 import pandas as pd
 import numpy as np
 from collections import defaultdict
+from datetime import datetime
 from sklearn.metrics import accuracy_score, log_loss
 from tabpfn_client import TabPFNClassifier
 
@@ -44,6 +47,32 @@ FEATURES = [
     "h2h_n", "h2h_home_winrate", "h2h_draw_rate", "h2h_gd",
     "home_crowd", "away_crowd", "importance",
 ]
+
+
+EXPERIMENTS_LOG = "experiments.jsonl"
+
+
+def git_commit():
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+def log_experiment(run_name, accuracy, logloss, n_matches, per_match):
+    entry = {
+        "run": run_name,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "commit": git_commit(),
+        "features": FEATURES,
+        "n_matches": n_matches,
+        "accuracy": round(accuracy, 4),
+        "log_loss": round(logloss, 4),
+        "per_match": per_match,
+    }
+    with open(EXPERIMENTS_LOG, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    print(f"Logged to {EXPERIMENTS_LOG} (run='{run_name}', commit={entry['commit']})")
 
 
 def importance(t):
@@ -202,6 +231,7 @@ def main():
     """Backtest on the previous calendar month, then predict all upcoming fixtures."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true", help="Re-download dataset from source")
+    parser.add_argument("--run-name", default=None, help="Label for this experiment (logged to experiments.jsonl)")
     args = parser.parse_args()
 
     df = load_data(refresh=args.refresh)
@@ -226,6 +256,17 @@ def main():
         per_match["predicted"] = pred_bt
         per_match["correct"] = per_match["outcome"] == per_match["predicted"]
         print(per_match.to_string(index=False))
+        if args.run_name:
+            log_experiment(
+                run_name=args.run_name,
+                accuracy=accuracy_score(test["outcome"], pred_bt),
+                logloss=log_loss(test["outcome"], proba_bt, labels=clf_bt.classes_),
+                n_matches=len(test),
+                per_match=per_match.assign(date=per_match["date"].dt.strftime("%Y-%m-%d"))
+                                   .to_dict(orient="records"),
+            )
+        else:
+            print("(pass --run-name <label> to log this experiment)")
     else:
         print("\nNo WC2026 group stage results found in dataset (try --refresh).")
 
