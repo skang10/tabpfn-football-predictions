@@ -214,7 +214,7 @@ def main():
 
     feats = build_features(df)
     played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
-    future = feats[feats["home_score"].isna() & (feats["date"] > TODAY)].sort_values("date")
+    future = feats[feats["home_score"].isna() & (feats["date"] >= TODAY)].sort_values("date")
 
     today_str = pd.Timestamp.now().strftime("%Y%m%d")
     slug = f"{args.run_name}_{today_str}" if args.run_name else today_str
