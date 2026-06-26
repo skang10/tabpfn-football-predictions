@@ -14,6 +14,7 @@ TODAY = pd.Timestamp.now().normalize()
 TRAIN_START = pd.Timestamp("2014-01-01")
 MAX_TRAIN = 10000
 HOME_ADV = 65.0
+DRAW_THRESHOLD = 0.28  # predict draw when P(draw) exceeds this; WC neutral draw rate ~29%
 DATA = "results.csv"
 RAW_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
 
@@ -44,9 +45,10 @@ def git_commit():
         return "unknown"
 
 
-def log_experiment(run_name, accuracy, logloss, n_matches, per_match, predictions_file):
+def log_experiment(run_name, accuracy, logloss, n_matches, per_match, predictions_file, parent=None):
     entry = {
         "run": run_name,
+        "parent": parent,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "commit": git_commit(),
         "features": FEATURES,
@@ -58,7 +60,7 @@ def log_experiment(run_name, accuracy, logloss, n_matches, per_match, prediction
     }
     with open(EXPERIMENTS_LOG, "a") as f:
         f.write(json.dumps(entry) + "\n")
-    print(f"Logged to {EXPERIMENTS_LOG} (run='{run_name}', commit={entry['commit']})")
+    print(f"Logged to {EXPERIMENTS_LOG} (run='{run_name}', parent='{parent}', commit={entry['commit']})")
 
 
 def importance(t):
@@ -223,6 +225,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true", help="Re-download dataset from source")
     parser.add_argument("--run-name", default=None, help="Label for this experiment (logged to experiments.jsonl)")
+    parser.add_argument("--parent", default=None, help="Parent experiment this builds on (e.g. baseline_20260626)")
     args = parser.parse_args()
 
     df = load_data(refresh=args.refresh)
@@ -243,12 +246,18 @@ def main():
         first_wc_date = test["date"].min()
         clf_bt = train(played[played["date"] < first_wc_date].tail(MAX_TRAIN))
         proba_bt = clf_bt.predict_proba(test[FEATURES].values)
-        pred_bt = clf_bt.classes_[proba_bt.argmax(1)]
+        cols_bt = {c: proba_bt[:, i] for i, c in enumerate(clf_bt.classes_)}
+        draw_idx = list(clf_bt.classes_).index("draw")
+        pred_bt = np.where(proba_bt[:, draw_idx] > DRAW_THRESHOLD, "draw",
+                           clf_bt.classes_[proba_bt.argmax(1)])
         print(f"\nBacktest WC2026 group stage rounds 1-2 ({len(test)} matches):")
         print(f"  accuracy  {accuracy_score(test['outcome'], pred_bt):.0%}")
         print(f"  log-loss  {log_loss(test['outcome'], proba_bt, labels=clf_bt.classes_):.3f}")
         per_match = test[["date", "home_team", "away_team", "outcome"]].copy()
         per_match["predicted"] = pred_bt
+        per_match["p_home_win"] = cols_bt["home_win"]
+        per_match["p_draw"] = cols_bt["draw"]
+        per_match["p_away_win"] = cols_bt["away_win"]
         per_match["correct"] = per_match["outcome"] == per_match["predicted"]
         print(per_match.to_string(index=False))
         if args.run_name:
@@ -258,6 +267,7 @@ def main():
                 logloss=log_loss(test["outcome"], proba_bt, labels=clf_bt.classes_),
                 n_matches=len(test),
                 predictions_file=filename,
+                parent=args.parent,
                 per_match=per_match.assign(date=per_match["date"].dt.strftime("%Y-%m-%d"))
                                    .to_dict(orient="records"),
             )
@@ -269,9 +279,11 @@ def main():
     clf = train(played.tail(MAX_TRAIN))
     proba = clf.predict_proba(future[FEATURES].values)
     cols = {c: proba[:, i] for i, c in enumerate(clf.classes_)}
+    draw_idx_fwd = list(clf.classes_).index("draw")
 
     out = future[["date", "home_team", "away_team"]].copy()
-    out["predicted"] = clf.classes_[proba.argmax(1)]
+    out["predicted"] = np.where(proba[:, draw_idx_fwd] > DRAW_THRESHOLD, "draw",
+                                clf.classes_[proba.argmax(1)])
     out["p_home_win"] = cols["home_win"]
     out["p_draw"] = cols["draw"]
     out["p_away_win"] = cols["away_win"]
