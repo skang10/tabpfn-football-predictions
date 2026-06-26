@@ -56,6 +56,29 @@ def confusion_matrix(df):
     ).reindex(index=OUTCOMES, columns=OUTCOMES, fill_value=0)
 
 
+def probability_diagnostics(df):
+    if not {"p_home_win", "p_draw", "p_away_win"}.issubset(df.columns):
+        return None
+    rows = {}
+    for outcome in OUTCOMES:
+        subset = df[df["outcome"] == outcome]
+        if len(subset):
+            rows[outcome] = {
+                "n": len(subset),
+                "avg_p_home": subset["p_home_win"].mean(),
+                "avg_p_draw": subset["p_draw"].mean(),
+                "avg_p_away": subset["p_away_win"].mean(),
+            }
+        else:
+            rows[outcome] = {
+                "n": 0,
+                "avg_p_home": float("nan"),
+                "avg_p_draw": float("nan"),
+                "avg_p_away": float("nan"),
+            }
+    return pd.DataFrame(rows).T.round(3)
+
+
 def short_name(run):
     """Strip date suffix for cleaner axis labels."""
     return run.rsplit("_", 1)[0] if run[-8:].isdigit() else run
@@ -224,6 +247,15 @@ def main():
     for exp in experiments:
         df = per_match_df(exp)
         pred_dist = prediction_distribution(df)
+        p_draw_actual_draw = "n/a"
+        p_draw_non_draw = "n/a"
+        if "p_draw" in df.columns:
+            draws = df[df["outcome"] == "draw"]
+            non_draws = df[df["outcome"] != "draw"]
+            if len(draws):
+                p_draw_actual_draw = f"{draws['p_draw'].mean():.1%}"
+            if len(non_draws):
+                p_draw_non_draw = f"{non_draws['p_draw'].mean():.1%}"
         summary_rows.append({
             "run":        exp["run"],
             "commit":     exp["commit"],
@@ -233,6 +265,8 @@ def main():
             "pred_home%": f"{pred_dist['home_win']:.0%}",
             "pred_draw%": f"{pred_dist['draw']:.0%}",
             "pred_away%": f"{pred_dist['away_win']:.0%}",
+            "p_draw(actual_draw)": p_draw_actual_draw,
+            "p_draw(non_draw)":    p_draw_non_draw,
         })
     print(pd.DataFrame(summary_rows).to_string(index=False))
 
@@ -252,6 +286,10 @@ def main():
         print(accuracy_by_outcome(df).to_string())
         print("\nConfusion matrix (actual → predicted):")
         print(confusion_matrix(df).to_string())
+        probs = probability_diagnostics(df)
+        if probs is not None:
+            print("\nAverage predicted probabilities by actual outcome:")
+            print(probs.to_string())
 
     print_separator("Generating plots")
     plot_summary(experiments)
