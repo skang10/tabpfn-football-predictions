@@ -265,7 +265,7 @@ def main():
         print(per_match.to_string(index=False))
         if args.run_name:
             log_experiment(
-                run_name=args.run_name,
+                run_name=slug,
                 accuracy=accuracy_score(test["outcome"], pred_bt),
                 logloss=log_loss(test["outcome"], proba_bt, labels=clf_bt.classes_),
                 n_matches=len(test),
