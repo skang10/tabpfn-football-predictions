@@ -5,15 +5,18 @@ Current best: 62% accuracy, 0.916 log-loss (baseline_20260626, 48 matches).
 
 ## Prioritised Ideas
 
-### 1. Fix draw prediction [ ]
-Biggest gap — model almost never predicts draws despite ~25% base rate in WC group stage.
-- Add `elo_closeness = 1 / (1 + abs(elo_diff))` — high when teams are evenly matched
-- Add `home_draw_rate` / `away_draw_rate` — each team's historical draw frequency
+### 1. Draw tendency + match balance features [x]
+Replace directional "who's stronger" features with features that answer "is this likely to stay unresolved?".
+- Track `drew` in `res` entries → `home_draw_rate10`, `away_draw_rate10`, `combined_draw_rate10`, `draw_rate_diff`
+- Add non-directional closeness: `elo_abs_diff`, `form_abs_diff`, `gd_abs_diff`, `elo_closeness`
+- Add low-scoring profile: `goal_environment`, `defensive_tightness`, `attack_abs_diff`
+- Remove redundant directional features: `home_elo`, `away_elo`, `home_form5`, `away_form5`, `home_winrate`, `away_winrate`, `h2h_home_winrate`
 
-### 2. Remove redundant features [ ]
-`elo_diff` = `home_elo - away_elo + adj`, so all three together triple-weight that signal.
-Same issue with `form5_diff` + `home_form5` + `away_form5`.
-Keep only diffs OR only individual features, not both.
+### 2. Round 3 qualification need-state [ ]
+Biggest predictor in round 3 isn't ELO — it's what each team needs to qualify.
+Add `home_points`, `away_points` (current WC group stage points) and derived
+`qualification_need` (win/draw/irrelevant) for each team before round 3 matches.
+Gentleman's agreement draws are nearly deterministic when both teams need a draw.
 
 ### 3. Split form by venue type [ ]
 Current `form5` mixes home and away results. For a neutral-venue tournament, away form

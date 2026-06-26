@@ -38,13 +38,18 @@ CROWD_SUPPORT = {
 DEFAULT_CROWD = 0.10  # teams with little North American diaspora
 
 FEATURES = [
-    "elo_diff", "home_elo", "away_elo",
-    "form5_diff", "form10_diff", "home_form5", "away_form5",
-    "home_winrate", "away_winrate",
-    "home_gf5", "away_gf5", "home_ga5", "away_ga5", "gd10_diff",
-    "home_streak", "away_streak", "home_rest", "away_rest",
-    "home_played", "away_played",
-    "h2h_n", "h2h_home_winrate", "h2h_draw_rate", "h2h_gd",
+    # directional strength
+    "elo_diff", "form10_diff", "gd10_diff",
+    # non-directional balance / closeness
+    "elo_abs_diff", "elo_closeness", "form_abs_diff", "gd_abs_diff",
+    # draw tendency
+    "home_draw_rate10", "away_draw_rate10", "combined_draw_rate10", "draw_rate_diff",
+    # goal environment
+    "home_gf5", "away_gf5", "home_ga5", "away_ga5",
+    "goal_environment", "defensive_tightness", "attack_abs_diff",
+    # context
+    "home_rest", "away_rest", "home_played", "away_played",
+    "h2h_n", "h2h_draw_rate", "h2h_gd",
     "home_crowd", "away_crowd", "importance",
 ]
 
@@ -120,33 +125,31 @@ def build_features(df):
     last_date, h2h = {}, defaultdict(list)
 
     def team_feats(team):
-        """Return pre-match stats for a team: ELO, form averages, win rate, goal stats, streak, games played.
+        """Return pre-match stats for a team: ELO, form, goal stats, draw rate, games played.
         Defaults represent a mid-table team with no history."""
         r = res[team]
         if not r:
-            return elo[team], 1.3, 1.3, 0.33, 1.0, 1.0, 0.0, 0.0, 0
+            #            elo   f5   f10  gf   ga   gd10  dr10  n
+            return elo[team], 1.3, 1.3, 1.0, 1.0, 0.0,  0.25, 0
         last5, last10 = r[-5:], r[-10:]
-        # each entry is (points, gf, ga, won); walk back until a non-win to count winning streak
-        streak = 0
-        for p, *_ in reversed(r):
-            if p < 1:
-                break
-            streak += 1
+        # each entry is (points, gf, ga, won, drew)
         return (elo[team],
-                np.mean([p for p, *_ in last5]), np.mean([p for p, *_ in last10]),
-                np.mean([w for *_, w in last10]),
-                np.mean([g for _, g, _, _ in last5]), np.mean([a for _, _, a, _ in last5]),
-                np.mean([g - a for _, g, a, _ in last10]), streak, len(r))
+                np.mean([p for p, *_ in last5]),
+                np.mean([p for p, *_ in last10]),
+                np.mean([g for _, g, _, _, _ in last5]),
+                np.mean([a for _, _, a, _, _ in last5]),
+                np.mean([g - a for _, g, a, _, _ in last10]),
+                np.mean([d for *_, d in last10]),
+                len(r))
 
     def h2h_feats(home, away):
         """Head-to-head record between the two teams, keyed by sorted pair so order doesn't matter.
         GD is flipped for matches where home was the away side."""
         m = h2h[tuple(sorted((home, away)))]
         if not m:
-            return 0, 0.5, 0.25, 0.0
+            return 0, 0.25, 0.0
         n = len(m)
         return (n,
-                sum(w == home for _, _, w in m) / n,
                 sum(w == "draw" for _, _, w in m) / n,
                 np.mean([g if h == home else -g for h, g, _ in m]))
 
@@ -162,35 +165,50 @@ def build_features(df):
         else:
             home_crowd, away_crowd = 0.0, 0.0
         adj = HOME_ADV * (home_crowd - away_crowd)
-        he, hf5, hf10, hwr, hgf, hga, hgd, hstk, hn = team_feats(h)
-        ae, af5, af10, awr, agf, aga, agd, astk, an = team_feats(a)
-        nm, h2h_wr, h2h_dr, h2h_gd = h2h_feats(h, a)
+        he, hf5, hf10, hgf, hga, hgd, hdr10, hn = team_feats(h)
+        ae, af5, af10, agf, aga, agd, adr10, an = team_feats(a)
+        nm, h2h_dr, h2h_gd = h2h_feats(h, a)
+        elo_diff = he + adj - ae
+        elo_abs  = abs(elo_diff)
         rows.append({
-            "elo_diff": he + adj - ae, "home_elo": he, "away_elo": ae,
-            "form5_diff": hf5 - af5, "form10_diff": hf10 - af10,
-            "home_form5": hf5, "away_form5": af5,
-            "home_winrate": hwr, "away_winrate": awr,
+            # directional strength
+            "elo_diff":         elo_diff,
+            "form10_diff":      hf10 - af10,
+            "gd10_diff":        hgd - agd,
+            # non-directional balance
+            "elo_abs_diff":     elo_abs,
+            "elo_closeness":    1 / (1 + elo_abs / 100),
+            "form_abs_diff":    abs(hf10 - af10),
+            "gd_abs_diff":      abs(hgd - agd),
+            # draw tendency
+            "home_draw_rate10": hdr10,
+            "away_draw_rate10": adr10,
+            "combined_draw_rate10": (hdr10 + adr10) / 2,
+            "draw_rate_diff":   hdr10 - adr10,
+            # goal environment
             "home_gf5": hgf, "away_gf5": agf, "home_ga5": hga, "away_ga5": aga,
-            "gd10_diff": hgd - agd, "home_streak": hstk, "away_streak": astk,
-            "home_rest": min((r.date - last_date[h]).days, 90) if h in last_date else 30,
-            "away_rest": min((r.date - last_date[a]).days, 90) if a in last_date else 30,
+            "goal_environment":    (hgf + agf + hga + aga) / 4,
+            "defensive_tightness": (hga + aga) / 2,
+            "attack_abs_diff":     abs(hgf - agf),
+            # context
+            "home_rest":  min((r.date - last_date[h]).days, 90) if h in last_date else 30,
+            "away_rest":  min((r.date - last_date[a]).days, 90) if a in last_date else 30,
             "home_played": hn, "away_played": an,
-            "h2h_n": nm, "h2h_home_winrate": h2h_wr, "h2h_draw_rate": h2h_dr, "h2h_gd": h2h_gd,
+            "h2h_n": nm, "h2h_draw_rate": h2h_dr, "h2h_gd": h2h_gd,
             "home_crowd": home_crowd, "away_crowd": away_crowd,
         })
 
         if not np.isnan(r.home_score):
             gd = r.home_score - r.away_score
-            # standard ELO expected score from home's perspective, with home-advantage baked into adj
             exp = 1 / (1 + 10 ** ((ae - he - adj) / 400))
             s = 1.0 if gd > 0 else (0.0 if gd < 0 else 0.5)
-            # goal-difference multiplier (FIFA-style): bigger wins shift ratings more
             g = 1.0 if abs(gd) <= 1 else (1.5 if abs(gd) == 2 else (11 + abs(gd)) / 8)
             delta = r.importance * g * (s - exp)
             elo[h] += delta
             elo[a] -= delta
-            res[h].append((3 if gd > 0 else (1 if gd == 0 else 0), r.home_score, r.away_score, gd > 0))
-            res[a].append((3 if gd < 0 else (1 if gd == 0 else 0), r.away_score, r.home_score, gd < 0))
+            drew = gd == 0
+            res[h].append((3 if gd > 0 else (1 if gd == 0 else 0), r.home_score, r.away_score, gd > 0, drew))
+            res[a].append((3 if gd < 0 else (1 if gd == 0 else 0), r.away_score, r.home_score, gd < 0, drew))
             last_date[h] = last_date[a] = r.date
             h2h[tuple(sorted((h, a)))].append((h, gd, h if gd > 0 else (a if gd < 0 else "draw")))
 
