@@ -37,9 +37,11 @@ Commit the current changes to predict.py on a dedicated experiment branch, run t
    git commit -m "Log backtest results for <run_name>"
    ```
 
-8. Switch back to main:
+8. Switch back to main and bring BACKTESTS.md across:
    ```
    git checkout main
+   git checkout exp/<run_name> -- BACKTESTS.md
+   git commit -m "Update BACKTESTS.md with results for <run_name>"
    ```
 
 9. Show the user the backtest results and confirm:
