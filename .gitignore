@@ -1,6 +1,7 @@
 results.csv
 predictions/
 experiments.jsonl
+plots/
 __pycache__/
 *.pyc
 .venv/
