@@ -246,7 +246,7 @@ def main():
 
     today_str = pd.Timestamp.now().strftime("%Y%m%d")
     slug = f"{args.run_name}_{today_str}" if args.run_name else today_str
-    filename = f"predictions_{slug}.csv"
+    filename = f"predictions/{slug}.csv"
 
     test = wc2026_group_rounds(feats, max_round=2)
     if len(test):
