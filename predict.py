@@ -59,7 +59,7 @@ def git_commit():
         return "unknown"
 
 
-def log_experiment(run_name, accuracy, logloss, n_matches, per_match):
+def log_experiment(run_name, accuracy, logloss, n_matches, per_match, predictions_file):
     entry = {
         "run": run_name,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -68,6 +68,7 @@ def log_experiment(run_name, accuracy, logloss, n_matches, per_match):
         "n_matches": n_matches,
         "accuracy": round(accuracy, 4),
         "log_loss": round(logloss, 4),
+        "predictions_file": predictions_file,
         "per_match": per_match,
     }
     with open(EXPERIMENTS_LOG, "a") as f:
@@ -243,6 +244,10 @@ def main():
     played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
     future = feats[feats["home_score"].isna() & (feats["date"] > TODAY)].sort_values("date")
 
+    today_str = pd.Timestamp.now().strftime("%Y%m%d")
+    slug = f"{args.run_name}_{today_str}" if args.run_name else today_str
+    filename = f"predictions_{slug}.csv"
+
     test = wc2026_group_rounds(feats, max_round=2)
     if len(test):
         first_wc_date = test["date"].min()
@@ -262,6 +267,7 @@ def main():
                 accuracy=accuracy_score(test["outcome"], pred_bt),
                 logloss=log_loss(test["outcome"], proba_bt, labels=clf_bt.classes_),
                 n_matches=len(test),
+                predictions_file=filename,
                 per_match=per_match.assign(date=per_match["date"].dt.strftime("%Y-%m-%d"))
                                    .to_dict(orient="records"),
             )
@@ -280,8 +286,6 @@ def main():
     out["p_draw"] = cols["draw"]
     out["p_away_win"] = cols["away_win"]
 
-    today_str = pd.Timestamp.now().strftime("%Y%m%d")
-    filename = f"predictions_{today_str}.csv"
     out.to_csv(filename, index=False)
 
     print(f"\n{len(out)} fixture predictions -> {filename}\n")
