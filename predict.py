@@ -167,6 +167,30 @@ def build_features(df):
     return df.join(pd.DataFrame(rows, index=df.index))
 
 
+def wc2026_group_rounds(feats, max_round=2):
+    """Return played WC2026 group-stage matches up to max_round per team.
+
+    Round number for a match = 1 + max games either team has already played
+    in the tournament, so round 1 = both teams' first WC game, etc.
+    """
+    wc = feats[
+        feats["tournament"].str.lower().str.contains("world cup") &
+        (feats["date"].dt.year == 2026) &
+        feats["outcome"].notna()
+    ].sort_values("date")
+
+    team_games = defaultdict(int)
+    include = []
+    for idx, row in wc.iterrows():
+        round_num = max(team_games[row["home_team"]], team_games[row["away_team"]]) + 1
+        if round_num <= max_round:
+            include.append(idx)
+        team_games[row["home_team"]] += 1
+        team_games[row["away_team"]] += 1
+
+    return wc.loc[include]
+
+
 def train(pool):
     """Fit TabPFN on the feature matrix; ignore_pretraining_limits allows >1000 rows."""
     clf = TabPFNClassifier(ignore_pretraining_limits=True, random_state=42)
@@ -189,15 +213,21 @@ def main():
     played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
     future = feats[feats["home_score"].isna() & (feats["date"] > TODAY)].sort_values("date")
 
-    month = (TODAY.to_period("M") - 1)
-    test = played[(played["date"] >= month.start_time) & (played["date"] < (month + 1).start_time)]
+    test = wc2026_group_rounds(feats, max_round=2)
     if len(test):
-        clf = train(played[played["date"] < month.start_time].tail(MAX_TRAIN))
-        proba = clf.predict_proba(test[FEATURES].values)
-        pred = clf.classes_[proba.argmax(1)]
-        print(f"\nBacktest {month} ({len(test)} matches): "
-              f"accuracy {accuracy_score(test['outcome'], pred):.0%}, "
-              f"log-loss {log_loss(test['outcome'], proba, labels=clf.classes_):.3f}")
+        first_wc_date = test["date"].min()
+        clf_bt = train(played[played["date"] < first_wc_date].tail(MAX_TRAIN))
+        proba_bt = clf_bt.predict_proba(test[FEATURES].values)
+        pred_bt = clf_bt.classes_[proba_bt.argmax(1)]
+        print(f"\nBacktest WC2026 group stage rounds 1-2 ({len(test)} matches):")
+        print(f"  accuracy  {accuracy_score(test['outcome'], pred_bt):.0%}")
+        print(f"  log-loss  {log_loss(test['outcome'], proba_bt, labels=clf_bt.classes_):.3f}")
+        per_match = test[["date", "home_team", "away_team", "outcome"]].copy()
+        per_match["predicted"] = pred_bt
+        per_match["correct"] = per_match["outcome"] == per_match["predicted"]
+        print(per_match.to_string(index=False))
+    else:
+        print("\nNo WC2026 group stage results found in dataset (try --refresh).")
 
     clf = train(played.tail(MAX_TRAIN))
     proba = clf.predict_proba(future[FEATURES].values)
