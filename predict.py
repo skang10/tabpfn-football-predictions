@@ -147,7 +147,6 @@ def build_features(df):
             "away_rest": min((r.date - last_date[a]).days, 90) if a in last_date else 30,
             "home_played": hn, "away_played": an,
             "h2h_n": nm, "h2h_home_winrate": h2h_wr, "h2h_draw_rate": h2h_dr, "h2h_gd": h2h_gd,
-            "neutral": r.neutral,
         })
 
         if not np.isnan(r.home_score):
