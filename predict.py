@@ -203,8 +203,10 @@ def wc2026_group_rounds(feats, max_round=2):
     Round number for a match = 1 + max games either team has already played
     in the tournament, so round 1 = both teams' first WC game, etc.
     """
+    t = feats["tournament"].str.lower()
     wc = feats[
-        feats["tournament"].str.lower().str.contains("world cup") &
+        t.str.contains("world cup") &
+        ~t.str.contains("qualif") &
         (feats["date"].dt.year == 2026) &
         feats["outcome"].notna()
     ].sort_values("date")
