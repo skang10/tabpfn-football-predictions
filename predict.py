@@ -17,26 +17,6 @@ HOME_ADV = 65.0
 DATA = "results.csv"
 RAW_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
 
-# Estimated crowd support [0,1] for 2026 World Cup venues in North America.
-# Host nations get 1.0; other teams scaled by diaspora size in North America.
-CROWD_SUPPORT = {
-    "United States": 1.00,
-    "Canada":        1.00,
-    "Mexico":        1.00,
-    "Argentina":     0.70,
-    "Brazil":        0.65,
-    "Colombia":      0.60,
-    "Ecuador":       0.55,
-    "Uruguay":       0.45,
-    "Peru":          0.45,
-    "Portugal":      0.40,
-    "Netherlands":   0.25,
-    "Norway":        0.20,
-    "Ghana":         0.20,
-    "Morocco":       0.20,
-}
-DEFAULT_CROWD = 0.10  # teams with little North American diaspora
-
 FEATURES = [
     "elo_diff", "home_elo", "away_elo",
     "form5_diff", "form10_diff", "home_form5", "away_form5",
@@ -45,7 +25,7 @@ FEATURES = [
     "home_streak", "away_streak", "home_rest", "away_rest",
     "home_played", "away_played",
     "h2h_n", "h2h_home_winrate", "h2h_draw_rate", "h2h_gd",
-    "home_crowd", "away_crowd", "importance",
+    "neutral", "importance",
 ]
 
 
@@ -152,16 +132,7 @@ def build_features(df):
 
     rows = []
     for r in df.itertuples():
-        h, a = r.home_team, r.away_team
-        is_wc2026 = "world cup" in r.tournament.lower() and r.date.year == 2026
-        if not r.neutral:
-            home_crowd, away_crowd = 1.0, 0.0
-        elif is_wc2026:
-            home_crowd = CROWD_SUPPORT.get(h, DEFAULT_CROWD)
-            away_crowd = CROWD_SUPPORT.get(a, DEFAULT_CROWD)
-        else:
-            home_crowd, away_crowd = 0.0, 0.0
-        adj = HOME_ADV * (home_crowd - away_crowd)
+        h, a, adj = r.home_team, r.away_team, HOME_ADV * (1 - r.neutral)
         he, hf5, hf10, hwr, hgf, hga, hgd, hstk, hn = team_feats(h)
         ae, af5, af10, awr, agf, aga, agd, astk, an = team_feats(a)
         nm, h2h_wr, h2h_dr, h2h_gd = h2h_feats(h, a)
@@ -176,7 +147,7 @@ def build_features(df):
             "away_rest": min((r.date - last_date[a]).days, 90) if a in last_date else 30,
             "home_played": hn, "away_played": an,
             "h2h_n": nm, "h2h_home_winrate": h2h_wr, "h2h_draw_rate": h2h_dr, "h2h_gd": h2h_gd,
-            "home_crowd": home_crowd, "away_crowd": away_crowd,
+            "neutral": r.neutral,
         })
 
         if not np.isnan(r.home_score):
