@@ -39,6 +39,14 @@ def git_commit():
         return "unknown"
 
 
+def git_branch():
+    try:
+        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+        return branch.split("/")[-1]  # exp/draw_features → draw_features
+    except Exception:
+        return "unknown"
+
+
 def log_experiment(run_name, accuracy, logloss, n_matches, per_match, predictions_file):
     entry = {
         "run": run_name,
@@ -217,7 +225,8 @@ def main():
     future = feats[feats["home_score"].isna() & (feats["date"] >= TODAY)].sort_values("date")
 
     today_str = pd.Timestamp.now().strftime("%Y%m%d")
-    slug = f"{args.run_name}_{today_str}" if args.run_name else today_str
+    run_label = args.run_name or git_branch()
+    slug = f"{run_label}_{today_str}"
     filename = f"predictions/{slug}.csv"
 
     test = wc2026_group_rounds(feats, max_round=2)
