@@ -86,10 +86,12 @@ def main():
     r3_rate   = draw_rate(wc26[wc26["round"] == "round_3"]["outcome"])
     r12_rate  = draw_rate(wc26[wc26["round"].isin(["round_1", "round_2"])]["outcome"])
 
+    n_r3 = len(wc26[wc26["round"] == "round_3"])
+    r3_note = "(incomplete — dataset may not cover all round 3 matches)" if n_r3 < 24 else ""
     print(f"Historical rounds 1+2 draw rate (1998–2022): {hist_rate:.1%}  (n={len(hist)})")
     print(f"WC2026 round 1 draw rate:                     {r1_rate:.1%}  (n={len(wc26[wc26['round']=='round_1'])})")
     print(f"WC2026 round 2 draw rate:                     {r2_rate:.1%}  (n={len(wc26[wc26['round']=='round_2'])})")
-    print(f"WC2026 round 3 draw rate:                     {r3_rate:.1%}  (n={len(wc26[wc26['round']=='round_3'])})  ← gentleman's agreement effect")
+    print(f"WC2026 round 3 draw rate:                     {r3_rate:.1%}  (n={n_r3})  {r3_note}")
     print(f"WC2026 rounds 1+2 combined:                   {r12_rate:.1%}  (n={len(wc26[wc26['round'].isin(['round_1','round_2'])])})")
     print(f"Delta vs historical:                          +{r12_rate - hist_rate:.1%}")
 
