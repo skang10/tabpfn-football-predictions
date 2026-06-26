@@ -5,3 +5,4 @@ Backtest scope: WC2026 group stage rounds 1 & 2 (48 matches), trained on all dat
 | run | parent | accuracy | Δacc | log-loss | Δloss | n_matches | commit | timestamp | notes |
 |-----|--------|----------|------|----------|-------|-----------|--------|-----------|-------|
 | baseline_20260627 | — | 62% | — | 0.916 | — | 48 | 5ac2c86 | 2026-06-27 | Original feature set (ec1282f) with WC2026 backtest infrastructure; 0 draws predicted |
+| draw_features_20260627 | baseline_20260627 | 62% | 0% | 0.922 | +0.006 | 48 | 5efe5e5 | 2026-06-27 | Draw tendency + match balance + goal environment features; pure argmax; 0 draws predicted |
