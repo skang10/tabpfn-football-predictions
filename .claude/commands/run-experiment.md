@@ -38,9 +38,16 @@ Primary metric: **multi-class log-loss** (lower is better).
    git checkout main -- features.py backtest.py
    ```
 
-4. Implement the model changes in `predict.py`. Ensure the standard interface is satisfied.
+4. Implement changes in the appropriate file(s):
+   - **`features.py`** — feature engineering that is generally useful across experiments:
+     new features, ELO tweaks, data loading fixes, new WC selectors
+   - **`predict.py`** — everything experiment-specific:
+     `train()`, `predict_proba()`, and any per-experiment overrides of
+     `FEATURES`, `TRAIN_START`, or `build_features` (e.g. adding draw-rate columns
+     that only this model needs)
+   Ensure `predict.py` satisfies the standard interface.
 
-5. Commit:
+5. Commit all changed files:
    ```
    git add predict.py features.py backtest.py
    git commit -m "<description>"
