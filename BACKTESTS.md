@@ -10,7 +10,8 @@ Uniform baseline log-loss = 1.099 (0.333/0.333/0.333 for all matches).
 |-----|----------|-------|----------|-----------|--------|-----------|-------|
 | baseline_wc2022_20260627 | 1.0795 | — | 51.6% | 64 | 4de9d1d | 2026-06-27 | 3-class TabPFN, TRAIN_START=2014; 15 actual draws / 0 predicted |
 | recency_2018_v2_20260627 | 1.0820 | +0.0025 | 51.6% | 64 | 6790f90 | 2026-06-27 | TRAIN_START=2018 only; fewer historical matches hurts on WC2022 |
-| goal_model_v2_wc22_20260627 | **1.0758** | **-0.0037** | 51.6% | 64 | 2c44434 | 2026-06-27 | Poisson regressors + balance features + TRAIN_START=2018; **best log-loss so far** |
+| goal_model_v2_wc22_20260627 | 1.0758 | -0.0037 | 51.6% | 64 | 2c44434 | 2026-06-27 | Poisson regressors + balance features + TRAIN_START=2018 |
+| dc_temp_scaling_20260627 | **1.0521** | **-0.0237** | 51.6% | 64 | 3ac4c1b | 2026-06-27 | + temperature scaling T=2.0 (post-hoc); DC ρ<0 uniformly hurts; **best log-loss so far** |
 
 ---
 
