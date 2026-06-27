@@ -175,30 +175,15 @@ def build_features(df):
     return df.join(pd.DataFrame(rows, index=df.index))
 
 
-def wc2026_group_rounds(feats, max_round=2):
-    """Return played WC2026 group-stage matches up to max_round per team.
-
-    Round number for a match = 1 + max games either team has already played
-    in the tournament, so round 1 = both teams' first WC game, etc.
-    """
+def wc_matches(feats, year):
+    """Return all played WC main-tournament matches for a given year (group stage + knockouts)."""
     t = feats["tournament"].str.lower()
-    wc = feats[
+    return feats[
         t.str.contains("world cup") &
         ~t.str.contains("qualif") &
-        (feats["date"].dt.year == 2026) &
+        (feats["date"].dt.year == year) &
         feats["outcome"].notna()
     ].sort_values("date")
-
-    team_games = defaultdict(int)
-    include = []
-    for idx, row in wc.iterrows():
-        round_num = max(team_games[row["home_team"]], team_games[row["away_team"]]) + 1
-        if round_num <= max_round:
-            include.append(idx)
-        team_games[row["home_team"]] += 1
-        team_games[row["away_team"]] += 1
-
-    return wc.loc[include]
 
 
 def train(pool):
@@ -229,24 +214,35 @@ def main():
     slug = f"{run_label}_{today_str}"
     filename = f"predictions/{slug}.csv"
 
-    test = wc2026_group_rounds(feats, max_round=2)
+    # ── Backtest on WC 2022 (full tournament, group stage + knockouts) ──────────
+    WC2022_START = pd.Timestamp("2022-11-20")
+    test = wc_matches(feats, 2022)
     if len(test):
-        first_wc_date = test["date"].min()
-        clf_bt = train(played[played["date"] < first_wc_date].tail(MAX_TRAIN))
+        pool_bt = played[played["date"] < WC2022_START].tail(MAX_TRAIN)
+        print(f"\nBacktest: WC 2022 ({len(test)} matches, trained on {len(pool_bt)} pre-tournament)")
+        clf_bt = train(pool_bt)
         proba_bt = clf_bt.predict_proba(test[FEATURES].values)
+        proba_bt = proba_bt / proba_bt.sum(axis=1, keepdims=True)  # ensure exact sum-to-1
         pred_bt = clf_bt.classes_[proba_bt.argmax(1)]
-        print(f"\nBacktest WC2026 group stage rounds 1-2 ({len(test)} matches):")
-        print(f"  accuracy  {accuracy_score(test['outcome'], pred_bt):.0%}")
-        print(f"  log-loss  {log_loss(test['outcome'], proba_bt, labels=clf_bt.classes_):.3f}")
+        ll = log_loss(test["outcome"], proba_bt, labels=clf_bt.classes_)
+        acc = accuracy_score(test["outcome"], pred_bt)
+        draws_actual = (test["outcome"] == "draw").sum()
+        draws_pred = (pred_bt == "draw").sum()
+        print(f"  log-loss  {ll:.4f}  ← primary metric")
+        print(f"  accuracy  {acc:.1%}")
+        print(f"  draws: {draws_actual} actual / {draws_pred} predicted")
         per_match = test[["date", "home_team", "away_team", "outcome"]].copy()
         per_match["predicted"] = pred_bt
-        per_match["correct"] = per_match["outcome"] == per_match["predicted"]
+        per_match["p_home_win"] = proba_bt[:, list(clf_bt.classes_).index("home_win")].round(3)
+        per_match["p_draw"]     = proba_bt[:, list(clf_bt.classes_).index("draw")].round(3)
+        per_match["p_away_win"] = proba_bt[:, list(clf_bt.classes_).index("away_win")].round(3)
+        per_match["correct"]    = per_match["outcome"] == per_match["predicted"]
         print(per_match.to_string(index=False))
         if args.run_name:
             log_experiment(
-                run_name=args.run_name,
-                accuracy=accuracy_score(test["outcome"], pred_bt),
-                logloss=log_loss(test["outcome"], proba_bt, labels=clf_bt.classes_),
+                run_name=slug,
+                accuracy=acc,
+                logloss=ll,
                 n_matches=len(test),
                 predictions_file=filename,
                 per_match=per_match.assign(date=per_match["date"].dt.strftime("%Y-%m-%d"))
@@ -255,7 +251,7 @@ def main():
         else:
             print("(pass --run-name <label> to log this experiment)")
     else:
-        print("\nNo WC2026 group stage results found in dataset (try --refresh).")
+        print("\nNo WC2022 matches found in dataset (try --refresh).")
 
     if not len(future):
         print("\nNo upcoming fixtures in dataset — run with --refresh to fetch latest data.")
@@ -263,6 +259,7 @@ def main():
 
     clf = train(played.tail(MAX_TRAIN))
     proba = clf.predict_proba(future[FEATURES].values)
+    proba = proba / proba.sum(axis=1, keepdims=True)  # ensure exact sum-to-1
     cols = {c: proba[:, i] for i, c in enumerate(clf.classes_)}
 
     out = future[["date", "home_team", "away_team"]].copy()
