@@ -1,15 +1,18 @@
 """Analyze and compare backtest results across experiments from experiments.jsonl."""
 import json
 import os
+import argparse
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
+from sklearn.metrics import log_loss
 
 OUTCOMES = ["home_win", "draw", "away_win"]
 OUTCOME_COLORS = {"home_win": "#4C72B0", "draw": "#DD8452", "away_win": "#55A868"}
 PLOTS_DIR = "plots"
+N_CAL_BINS = 10
 
 
 def load_experiments(path="experiments.jsonl"):
@@ -82,6 +85,89 @@ def probability_diagnostics(df):
 def short_name(run):
     """Strip date suffix for cleaner axis labels."""
     return run.rsplit("_", 1)[0] if run[-8:].isdigit() else run
+
+
+def has_probs(df):
+    return {"p_home_win", "p_draw", "p_away_win"}.issubset(df.columns)
+
+
+def per_class_logloss(df):
+    """Compute log-loss restricted to matches where a given class is the true outcome."""
+    if not has_probs(df):
+        return None
+    # sklearn log_loss requires labels in lexicographic order: away_win, draw, home_win
+    proba_raw = df[["p_home_win", "p_draw", "p_away_win"]].values
+    proba_raw = proba_raw / proba_raw.sum(axis=1, keepdims=True)
+    proba = np.column_stack([proba_raw[:, 2], proba_raw[:, 1], proba_raw[:, 0]])  # away,draw,home
+    labels_lex = ["away_win", "draw", "home_win"]
+    results = {}
+    for cls in OUTCOMES:
+        mask = df["outcome"] == cls
+        if mask.sum() < 2:
+            results[cls] = float("nan")
+            continue
+        results[cls] = log_loss(df.loc[mask, "outcome"], proba[mask], labels=labels_lex)
+    return results
+
+
+def calibration_ece(df, n_bins=N_CAL_BINS):
+    """Expected Calibration Error per class using equal-width bins."""
+    if not has_probs(df):
+        return None
+    prob_cols = {"home_win": "p_home_win", "draw": "p_draw", "away_win": "p_away_win"}
+    results = {}
+    for cls, col in prob_cols.items():
+        probs = df[col].values
+        labels = (df["outcome"] == cls).astype(float).values
+        bins = np.linspace(0, 1, n_bins + 1)
+        ece = 0.0
+        for lo, hi in zip(bins[:-1], bins[1:]):
+            mask = (probs >= lo) & (probs < hi)
+            if mask.sum() == 0:
+                continue
+            conf = probs[mask].mean()
+            acc  = labels[mask].mean()
+            ece += mask.sum() * abs(conf - acc)
+        results[cls] = ece / len(probs)
+    return results
+
+
+def reliability_data(df, cls, n_bins=N_CAL_BINS):
+    """Return (mean_confidence, fraction_positive, bin_count) arrays for a reliability diagram."""
+    col = {"home_win": "p_home_win", "draw": "p_draw", "away_win": "p_away_win"}[cls]
+    probs  = df[col].values
+    labels = (df["outcome"] == cls).astype(float).values
+    bins = np.linspace(0, 1, n_bins + 1)
+    conf_vals, frac_pos, counts = [], [], []
+    for lo, hi in zip(bins[:-1], bins[1:]):
+        mask = (probs >= lo) & (probs < hi)
+        if mask.sum() == 0:
+            continue
+        conf_vals.append(probs[mask].mean())
+        frac_pos.append(labels[mask].mean())
+        counts.append(mask.sum())
+    return np.array(conf_vals), np.array(frac_pos), np.array(counts)
+
+
+def group_knockout_split(df):
+    """Split WC matches into group stage (>=3 matches per team) vs knockout."""
+    if "date" not in df.columns:
+        return None, None
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
+    team_count = {}
+    stage = []
+    for r in df.itertuples():
+        h, a = r.home_team, r.away_team
+        th = team_count.get(h, 0)
+        ta = team_count.get(a, 0)
+        is_group = th < 3 and ta < 3
+        stage.append("group" if is_group else "knockout")
+        team_count[h] = th + 1
+        team_count[a] = ta + 1
+    df["stage"] = stage
+    return df[df["stage"] == "group"], df[df["stage"] == "knockout"]
 
 
 def save(fig, name):
@@ -227,6 +313,61 @@ def plot_logloss_trend(experiments):
     save(fig, "05_logloss_trend.png")
 
 
+# ── Plot 6: reliability diagrams ─────────────────────────────────────────────
+def plot_reliability(experiments):
+    exps_with_probs = [e for e in experiments if has_probs(per_match_df(e))]
+    if not exps_with_probs:
+        return
+    n = len(exps_with_probs)
+    fig, axes = plt.subplots(n, 3, figsize=(12, 4 * n), squeeze=False)
+    fig.suptitle("Reliability diagrams (calibration) — perfect = diagonal",
+                 fontsize=12, fontweight="bold")
+    for row, exp in enumerate(exps_with_probs):
+        df = per_match_df(exp)
+        for col, cls in enumerate(OUTCOMES):
+            ax = axes[row][col]
+            conf, frac, counts = reliability_data(df, cls)
+            ax.plot([0, 1], [0, 1], "k--", linewidth=0.8, label="perfect")
+            sc = ax.scatter(conf, frac, s=counts * 4, color=OUTCOME_COLORS[cls],
+                            alpha=0.8, zorder=3)
+            ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+            ax.set_xlabel("Mean predicted P"); ax.set_ylabel("Fraction positive")
+            ax.set_title(f"{short_name(exp['run'])} — {cls}", fontsize=9)
+            ece = calibration_ece(df) or {}
+            ax.text(0.05, 0.9, f"ECE={ece.get(cls, float('nan')):.3f}",
+                    transform=ax.transAxes, fontsize=8)
+    fig.tight_layout()
+    save(fig, "06_reliability.png")
+
+
+# ── Plot 7: log-loss by class ─────────────────────────────────────────────────
+def plot_logloss_by_class(experiments):
+    exps_with_probs = [e for e in experiments if has_probs(per_match_df(e))]
+    if not exps_with_probs:
+        return
+    names = [short_name(e["run"]) for e in exps_with_probs]
+    x = np.arange(len(OUTCOMES))
+    w = 0.8 / len(exps_with_probs)
+    fig, ax = plt.subplots(figsize=(9, 5))
+    fig.suptitle("Log-loss by actual outcome class", fontsize=12, fontweight="bold")
+    for i, exp in enumerate(exps_with_probs):
+        df = per_match_df(exp)
+        cls_ll = per_class_logloss(df) or {}
+        vals = [cls_ll.get(o, float("nan")) for o in OUTCOMES]
+        offset = (i - len(exps_with_probs) / 2 + 0.5) * w
+        bars = ax.bar(x + offset, vals, w, label=short_name(exp["run"]),
+                      color=[OUTCOME_COLORS[o] for o in OUTCOMES], alpha=0.8)
+        for bar, v in zip(bars, vals):
+            if not np.isnan(v):
+                ax.text(bar.get_x() + bar.get_width() / 2, v + 0.01,
+                        f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+    ax.set_xticks(x); ax.set_xticklabels(OUTCOMES)
+    ax.set_ylabel("Log-loss"); ax.legend(fontsize=8, loc="upper right")
+    ax.axhline(np.log(3), color="gray", linestyle="--", linewidth=0.8, label="uniform=1.099")
+    fig.tight_layout()
+    save(fig, "07_logloss_by_class.png")
+
+
 # ── Console output ────────────────────────────────────────────────────────────
 def print_separator(title=""):
     width = 60
@@ -237,9 +378,23 @@ def print_separator(title=""):
 
 
 def main():
-    experiments = load_experiments()
-    if not experiments:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runs", nargs="*", help="Filter to specific run name substrings")
+    args = parser.parse_args()
+
+    all_experiments = load_experiments()
+    if not all_experiments:
         print("No experiments found in experiments.jsonl")
+        return
+
+    experiments = all_experiments
+    if args.runs:
+        experiments = [e for e in all_experiments
+                       if any(r in e["run"] for r in args.runs)]
+        print(f"Filtered to {len(experiments)} experiments matching {args.runs}")
+
+    if not experiments:
+        print("No matching experiments")
         return
 
     print_separator("Summary")
@@ -291,12 +446,43 @@ def main():
             print("\nAverage predicted probabilities by actual outcome:")
             print(probs.to_string())
 
+        cls_ll = per_class_logloss(df)
+        if cls_ll:
+            print("\nLog-loss by actual outcome class:")
+            for cls, ll in cls_ll.items():
+                n_cls = (df["outcome"] == cls).sum()
+                print(f"  {cls:<10}  {ll:.4f}  (n={n_cls})")
+
+        ece = calibration_ece(df)
+        if ece:
+            print("\nExpected Calibration Error (ECE) per class:")
+            for cls, e in ece.items():
+                print(f"  {cls:<10}  {e:.4f}")
+
+        group_df, ko_df = group_knockout_split(df)
+        if group_df is not None and has_probs(df):
+            print(f"\nGroup stage ({len(group_df)} matches) vs Knockout ({len(ko_df)} matches):")
+            for stage_label, stage_df in [("group", group_df), ("knockout", ko_df)]:
+                if len(stage_df) < 2:
+                    continue
+                proba_raw = stage_df[["p_home_win", "p_draw", "p_away_win"]].values
+                proba_raw = proba_raw / proba_raw.sum(axis=1, keepdims=True)
+                proba_lex = np.column_stack([proba_raw[:, 2], proba_raw[:, 1], proba_raw[:, 0]])
+                ll = log_loss(stage_df["outcome"], proba_lex,
+                              labels=["away_win", "draw", "home_win"])
+                acc = (stage_df["outcome"] == stage_df["predicted"]).mean()
+                draws_actual = (stage_df["outcome"] == "draw").sum()
+                print(f"  {stage_label:<8}  log-loss={ll:.4f}  acc={acc:.1%}  "
+                      f"draws={draws_actual}/{len(stage_df)}")
+
     print_separator("Generating plots")
     plot_summary(experiments)
     plot_prediction_distributions(experiments)
     plot_accuracy_by_outcome(experiments)
     plot_confusion_matrices(experiments)
     plot_logloss_trend(experiments)
+    plot_reliability(experiments)
+    plot_logloss_by_class(experiments)
     print(f"\nAll plots saved to ./{PLOTS_DIR}/")
 
 
