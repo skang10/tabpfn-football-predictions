@@ -12,4 +12,5 @@ Backtest scope: WC2026 group stage rounds 1 & 2 (48 matches), trained on all dat
 | two_stage_20260627 | baseline_20260627 | 62% | 0% | 0.943 | +0.027 | 48 | 0c8a8b3 | 2026-06-27 | Stage 1 draw/not_draw + Stage 2 home/away; max P(draw)=0.30; 0 draws predicted |
 | recency_2018_20260627 | baseline_20260627 | 62% | 0% | 0.915 | -0.001 | 48 | 46317f4 | 2026-06-27 | Train only on post-2018 matches; marginally better log-loss; 0 draws predicted |
 | threshold_sweep_20260627 | recency_2018_20260627 | 62% | 0% | 0.915 | 0% | 48 | 58bfdb8 | 2026-06-27 | Sweep thr∈[0.20,0.32]; at 0.27: 58% acc, 14 predicted draws (5 correct, 36% hit); at 0.32: 62%, 0 draws |
-| two_stage_threshold_20260627 | threshold_sweep_20260627 | 60% | -2% | — | — | 48 | 0657c5d | 2026-06-27 | Stage 1 draw/not_draw binary + thr sweep; P(draw) lower than 3-class; best at thr=0.28 (60%, 2 draws, 0 correct) |
+| two_stage_threshold_20260627 | threshold_sweep_20260627 | 60% | -2% | — | — | 48 | 0657c5d | 2026-06-27 | Stage 1 binary draw/not_draw + threshold; P(draw) lower than 3-class; best draws at 0.22 (52%, 7/23 correct) |
+| draw_calibrated_20260627 | recency_2018_20260627 | 38% | -24% | 0.937 | +0.022 | 48 | 70b0782 | 2026-06-27 | Balance features + isotonic calibration (80/20 split) + sweep; argmax 54% (train split hurt); 11/38 draws at thr=0.20 |
