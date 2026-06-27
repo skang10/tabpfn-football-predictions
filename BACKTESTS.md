@@ -1,21 +1,37 @@
 # Backtest Results
 
 **Primary metric: multi-class log-loss (lower is better)** — competition scoring metric per rules §8.
-Backtest scope: WC 2022 full tournament (64 matches, group stage + knockouts), trained on all data before 2022-11-20.
-Uniform baseline log-loss = 1.099 (0.333/0.333/0.333 for all matches).
+Uniform baseline (random guessing) log-loss = 1.099.
 
-> Prior experiments below were evaluated on WC 2026 group stage rounds 1-2 (48 matches) and used **accuracy** as primary metric — superseded.
+Three fixed test sets, all evaluated with `uv run backtest.py` on each branch:
+- **BT1** WC 2022 group stage (48 matches) — model trained on data before 2022-11-20
+- **BT2** WC 2022 knockout (16 matches) — same model as BT1
+- **BT3** WC 2026 group stage rounds 1-2 (48 matches) — model trained on data before WC 2026 start
 
-| run | log-loss | Δloss | accuracy | n_matches | commit | timestamp | notes |
-|-----|----------|-------|----------|-----------|--------|-----------|-------|
-| baseline_wc2022_20260627 | 1.0795 | — | 51.6% | 64 | 4de9d1d | 2026-06-27 | 3-class TabPFN, TRAIN_START=2014; 15 actual draws / 0 predicted |
-| recency_2018_v2_20260627 | 1.0820 | +0.0025 | 51.6% | 64 | 6790f90 | 2026-06-27 | TRAIN_START=2018 only; fewer historical matches hurts on WC2022 |
-| goal_model_v2_wc22_20260627 | 1.0758 | -0.0037 | 51.6% | 64 | 2c44434 | 2026-06-27 | Poisson regressors + balance features + TRAIN_START=2018 |
-| dc_temp_scaling_20260627 | **1.0521** | **-0.0237** | 51.6% | 64 | 3ac4c1b | 2026-06-27 | + temperature scaling T=2.0 (post-hoc); DC ρ<0 uniformly hurts; **best log-loss so far** |
+BT1+2 (WC 2022 full, 64 matches) is the primary logged metric for experiment comparisons.
+
+| experiment | branch | BT1 group | BT2 knockout | **BT1+2 WC22 full** | BT3 WC26 r1-2 | model | TRAIN_START | notes |
+|------------|--------|-----------|--------------|---------------------|----------------|-------|-------------|-------|
+| baseline | main | 1.1258 | 0.9405 | **1.0795** | 0.9163 | TabPFN 3-class | 2014 | 26 features; 0 draws predicted everywhere |
+| recency_2018 | exp/recency_2018_v2 | 1.1398 | 0.9089 | 1.0820 | **0.9146** | TabPFN 3-class | 2018 | Same features, smaller training window |
+| goal_model_v2 | exp/goal_model_v2_wc22 | 1.1193 | 0.9450 | 1.0758 | 0.9281 | Poisson (TabPFN regressor) | 2018 | 31 features (+ balance/draw-rate); T=1.0 |
+| dc_temp_scaling | exp/dc_temp_scaling | **1.0700** | 0.9984 | **1.0521** | 0.9502 | Poisson + temp T=2.0 | 2018 | DC ρ=0 (disabled); **best on WC22 group + full** |
+
+**Bold** = best in column. Uniform baseline = 1.099.
+
+### Key observations
+
+- **dc_temp_scaling** is best on WC 2022 (full and group stage), confirming that temperature T=2.0 corrects overconfidence on upset-heavy group stages.
+- **dc_temp_scaling is worst on BT3 (WC 2026 rounds 1-2)** at 0.9502 vs baseline 0.9163. T=2.0 was tuned on WC 2022 which was abnormally upset-heavy; it over-flattens probabilities for WC 2026 where favorites are winning more as expected.
+- **recency_2018** narrowly best on BT3 (0.9146), suggesting more recent training data helps on current-tournament dynamics.
+- BT2 (knockout) and BT3 (WC 2026) favour less flattening — temperature scaling is a double-edged sword.
+- No model predicts any draws (P(draw) peaks at ~0.30, never beats argmax).
 
 ---
 
-## Superseded experiments (WC 2026 group stage backtest, accuracy-primary)
+## Superseded experiments (WC 2026 group stage rounds 1-2 backtest, accuracy-primary)
+
+> These used a different test set and accuracy as primary metric. Included for historical reference only.
 
 | run | parent | accuracy | Δacc | log-loss | n_matches | commit | timestamp | notes |
 |-----|--------|----------|------|----------|-----------|--------|-----------|-------|
