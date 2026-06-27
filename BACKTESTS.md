@@ -11,3 +11,4 @@ Backtest scope: WC2026 group stage rounds 1 & 2 (48 matches), trained on all dat
 | goal_model_dc_20260627 | goal_model_20260627 | 62% | 0% | 0.933 | -0.002 | 48 | bb3bc9e | 2026-06-27 | Dixon-Coles correction; fitted ρ=-0.02 (negligible); 0 draws predicted |
 | two_stage_20260627 | baseline_20260627 | 62% | 0% | 0.943 | +0.027 | 48 | 0c8a8b3 | 2026-06-27 | Stage 1 draw/not_draw + Stage 2 home/away; max P(draw)=0.30; 0 draws predicted |
 | recency_2018_20260627 | baseline_20260627 | 62% | 0% | 0.915 | -0.001 | 48 | 46317f4 | 2026-06-27 | Train only on post-2018 matches; marginally better log-loss; 0 draws predicted |
+| threshold_sweep_20260627 | recency_2018_20260627 | 58% | -4% | 0.915 | 0% | 48 | 58bfdb8 | 2026-06-27 | Best draw threshold = 0.27 (58% acc, 14 predicted, 5/14 correct = 36% hit rate); 0.32 = 62% no draws |
