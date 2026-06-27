@@ -1,53 +1,76 @@
-Commit the current changes to predict.py on a dedicated experiment branch, run the backtest and prediction, log results to BACKTESTS.md, then return to main.
+Run a new experiment: create a branch, implement the model in predict.py, run all three backtests, and update BACKTESTS.md.
+
+## Architecture
+
+- `features.py` — shared data loading and feature engineering (do not modify per-experiment)
+- `backtest.py` — model-agnostic evaluator; runs BT1/BT2/BT3 (do not modify per-experiment)
+- `predict.py` — **the only file that changes per experiment**; must expose the standard interface:
+  - `train(pool) → model`
+  - `predict_proba(model, X) → DataFrame[p_home_win, p_draw, p_away_win]`
+  - `FEATURES`, `TRAIN_START`, `build_features` (may override the defaults from features.py)
+
+## Backtests
+
+| ID | Test set | Matches | Training cutoff |
+|----|----------|---------|-----------------|
+| BT1 | WC 2022 group stage | 48 | 2022-11-20 |
+| BT2 | WC 2022 knockout | 16 | 2022-11-20 |
+| BT3 | WC 2026 group stage rounds 1–2 | 48 | 2026-06-11 |
+
+Primary metric: **multi-class log-loss** (lower is better).
 
 ## Steps
 
 1. Ask the user for:
-   - `run_name`: short slug for this experiment (e.g. `draw_features`, `recency_filter`)
+   - `run_name`: short slug (e.g. `recency_2018`, `draw_boost`)
+   - `parent_branch`: which branch to start from — default `main` (baseline); use an experiment branch if building on a prior experiment
    - `description`: one sentence describing what changed
-   - `notes`: brief note for the BACKTESTS.md table
+   - `notes`: brief note for the BACKTESTS.md row
 
-2. Create and switch to an experiment branch from main:
+2. Create the experiment branch:
    ```
-   git checkout main
+   git checkout <parent_branch>
    git checkout -b exp/<run_name>
    ```
 
-3. Stage and commit predict.py:
+3. If `features.py` or `backtest.py` are missing on this branch, bring them from main:
    ```
-   git add predict.py
+   git checkout main -- features.py backtest.py
+   ```
+
+4. Implement the model changes in `predict.py`. Ensure the standard interface is satisfied.
+
+5. Commit:
+   ```
+   git add predict.py features.py backtest.py
    git commit -m "<description>"
    ```
 
-4. Run prediction with the run name:
+6. Run all three backtests:
    ```
-   uv run predict.py --run-name <run_name>
-   ```
-
-5. Parse the backtest output for accuracy, log-loss, and n_matches. Get the short commit hash via `git rev-parse --short HEAD`.
-
-6. Append a new row to the table in `BACKTESTS.md`:
-   ```
-   | <run_name>_<date> | <accuracy> | <log-loss> | <n_matches> | <commit> | <today's date> | <notes> |
+   uv run backtest.py --run-name <run_name>
    ```
 
-7. Commit BACKTESTS.md on the experiment branch:
+7. Parse the output for BT1, BT2, BT3 log-loss and accuracy. Get the commit hash:
+   ```
+   git rev-parse --short HEAD
+   ```
+
+8. Update BACKTESTS.md: append one row to each of the three BT tables.
+   - Use `**bold**` on the log-loss value if it is the best in that column.
+   - Use `<u>underline</u>` on the accuracy value if it is the best in that column.
+
+9. Commit BACKTESTS.md on the experiment branch:
    ```
    git add BACKTESTS.md
    git commit -m "Log backtest results for <run_name>"
    ```
 
-8. Switch back to main:
-   ```
-   git checkout main
-   ```
-
-9. Show the user the backtest results and confirm:
-   - Branch `exp/<run_name>` created and committed
-   - `experiments.jsonl` logged
-   - `BACKTESTS.md` updated on both the experiment branch and main
-
-10. If this experiment beats the current best, ask the user if they want to merge it into main:
+10. Bring BACKTESTS.md back to main:
     ```
-    git merge exp/<run_name>
+    git checkout main
+    git checkout exp/<run_name> -- BACKTESTS.md
+    git commit -m "BACKTESTS.md: add <run_name> results"
     ```
+
+11. Report BT1/BT2/BT3 results to the user and confirm the branch and log entry were created.
