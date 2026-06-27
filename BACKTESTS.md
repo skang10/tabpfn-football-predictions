@@ -1,17 +1,29 @@
 # Backtest Results
 
-Backtest scope: WC2026 group stage rounds 1 & 2 (48 matches), trained on all data before first WC2026 match.
+**Primary metric: multi-class log-loss (lower is better)** — competition scoring metric per rules §8.
+Backtest scope: WC 2022 full tournament (64 matches, group stage + knockouts), trained on all data before 2022-11-20.
+Uniform baseline log-loss = 1.099 (0.333/0.333/0.333 for all matches).
 
-| run | parent | accuracy | Δacc | log-loss | Δloss | n_matches | commit | timestamp | notes |
-|-----|--------|----------|------|----------|-------|-----------|--------|-----------|-------|
-| baseline_20260627 | — | 62% | — | 0.916 | — | 48 | 5ac2c86 | 2026-06-27 | Original feature set (ec1282f) with WC2026 backtest infrastructure; 0 draws predicted |
-| draw_features_20260627 | baseline_20260627 | 62% | 0% | 0.922 | +0.006 | 48 | 5efe5e5 | 2026-06-27 | Draw tendency + match balance + goal environment features; pure argmax; 0 draws predicted |
-| draw_threshold_20260627 | draw_features_20260627 | 58% | -4% | 0.922 | 0% | 48 | 2a2ffa2 | 2026-06-27 | Draw threshold 0.28 on draw features; 12/48 predicted draws (4 correct) |
-| goal_model_20260627 | baseline_20260627 | 62% | 0% | 0.935 | +0.019 | 48 | 3a75365 | 2026-06-27 | Two TabPFN regressors (home/away goals) + Poisson simulation; 0 draws predicted |
-| goal_model_dc_20260627 | goal_model_20260627 | 62% | 0% | 0.933 | -0.002 | 48 | bb3bc9e | 2026-06-27 | Dixon-Coles correction; fitted ρ=-0.02 (negligible); 0 draws predicted |
-| two_stage_20260627 | baseline_20260627 | 62% | 0% | 0.943 | +0.027 | 48 | 0c8a8b3 | 2026-06-27 | Stage 1 draw/not_draw + Stage 2 home/away; max P(draw)=0.30; 0 draws predicted |
-| recency_2018_20260627 | baseline_20260627 | 62% | 0% | 0.915 | -0.001 | 48 | 46317f4 | 2026-06-27 | Train only on post-2018 matches; marginally better log-loss; 0 draws predicted |
-| threshold_sweep_20260627 | recency_2018_20260627 | 62% | 0% | 0.915 | 0% | 48 | 58bfdb8 | 2026-06-27 | Sweep thr∈[0.20,0.32]; at 0.27: 58% acc, 14 predicted draws (5 correct, 36% hit); at 0.32: 62%, 0 draws |
-| two_stage_threshold_20260627 | threshold_sweep_20260627 | 60% | -2% | — | — | 48 | 0657c5d | 2026-06-27 | Stage 1 binary draw/not_draw + threshold; P(draw) lower than 3-class; best draws at 0.22 (52%, 7/23 correct) |
-| draw_calibrated_20260627 | recency_2018_20260627 | 38% | -24% | 0.937 | +0.022 | 48 | 70b0782 | 2026-06-27 | Balance features + isotonic calibration (80/20 split) + sweep; argmax 54% (train split hurt); 11/38 draws at thr=0.20 |
-| goal_model_v2_20260627 | draw_calibrated_20260627 | 62% | +24% | 0.928 | -0.009 | 48 | 1a4a1fb | 2026-06-27 | Poisson regressors + balance/draw-rate features; thr=0.27: **62% acc + 8 draws (3 correct, 38% hit rate)** — matches baseline accuracy while predicting draws |
+> Prior experiments below were evaluated on WC 2026 group stage rounds 1-2 (48 matches) and used **accuracy** as primary metric — superseded.
+
+| run | log-loss | Δloss | accuracy | n_matches | commit | timestamp | notes |
+|-----|----------|-------|----------|-----------|--------|-----------|-------|
+| baseline_wc2022_20260627 | 1.0795 | — | 51.6% | 64 | 4de9d1d | 2026-06-27 | 3-class TabPFN, TRAIN_START=2014, WC2022 holdout; 15 actual draws / 0 predicted |
+
+---
+
+## Superseded experiments (WC 2026 group stage backtest, accuracy-primary)
+
+| run | parent | accuracy | Δacc | log-loss | n_matches | commit | timestamp | notes |
+|-----|--------|----------|------|----------|-----------|--------|-----------|-------|
+| baseline_20260627 | — | 62% | — | 0.916 | 48 | 5ac2c86 | 2026-06-27 | Original feature set; 0 draws predicted |
+| draw_features_20260627 | baseline_20260627 | 62% | 0% | 0.922 | 48 | 5efe5e5 | 2026-06-27 | Draw tendency features; 0 draws predicted |
+| draw_threshold_20260627 | draw_features_20260627 | 58% | -4% | 0.922 | 48 | 2a2ffa2 | 2026-06-27 | Threshold 0.28; 12/48 predicted draws (4 correct) |
+| goal_model_20260627 | baseline_20260627 | 62% | 0% | 0.935 | 48 | 3a75365 | 2026-06-27 | Poisson + two regressors; 0 draws |
+| goal_model_dc_20260627 | goal_model_20260627 | 62% | 0% | 0.933 | 48 | bb3bc9e | 2026-06-27 | Dixon-Coles ρ=-0.02; 0 draws |
+| two_stage_20260627 | baseline_20260627 | 62% | 0% | 0.943 | 48 | 0c8a8b3 | 2026-06-27 | Stage 1 draw/not_draw + Stage 2; 0 draws |
+| recency_2018_20260627 | baseline_20260627 | 62% | 0% | 0.915 | 48 | 46317f4 | 2026-06-27 | TRAIN_START=2018; best log-loss in old backtest |
+| threshold_sweep_20260627 | recency_2018_20260627 | 62% | 0% | 0.915 | 48 | 58bfdb8 | 2026-06-27 | Sweep thr∈[0.20,0.32]; at 0.27: 58% acc, 14 draws (5 correct) |
+| two_stage_threshold_20260627 | threshold_sweep_20260627 | 60% | -2% | — | 48 | 0657c5d | 2026-06-27 | Stage 1 binary + threshold; best draws at 0.22 (52%, 7/23 correct) |
+| draw_calibrated_20260627 | recency_2018_20260627 | 38% | -24% | 0.937 | 48 | 70b0782 | 2026-06-27 | Balance features + isotonic calibration (80/20 split); train split hurt |
+| goal_model_v2_20260627 | draw_calibrated_20260627 | 62% | +24% | 0.928 | 48 | 1a4a1fb | 2026-06-27 | Poisson + balance/draw-rate features; thr=0.27: 62% acc, 8 draws (3 correct) |
