@@ -28,7 +28,8 @@ from features import (
 from predict import train, predict_proba, FEATURES, TRAIN_START, build_features
 from analyze_backtest import (
     print_summary, print_diagnostics,
-    plot_logloss_grouped, plot_logloss_heatmap, plot_draw_distribution,
+    plot_logloss_grouped, plot_logloss_heatmap,
+    plot_draw_distribution, plot_outcome_distribution,
 )
 
 EXPERIMENTS_LOG = "experiments.jsonl"
@@ -178,6 +179,7 @@ def main():
     plot_logloss_grouped([exp])
     plot_logloss_heatmap([exp])
     plot_draw_distribution([exp])
+    plot_outcome_distribution([exp])
 
 
 if __name__ == "__main__":

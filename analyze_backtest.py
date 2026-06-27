@@ -186,6 +186,72 @@ def plot_draw_distribution(experiments):
     save(fig, "03_draw_distribution.png")
 
 
+# ── Plot 4: predicted vs actual outcome distribution ─────────────────────────
+
+def plot_outcome_distribution(experiments):
+    """For each experiment × BT: grouped bars of predicted% vs actual% per class."""
+    n_exp = len(experiments)
+    n_bt  = len(BACKTESTS)
+
+    outcome_colors = {
+        "home_win": "#4C72B0",
+        "draw":     "#DD8452",
+        "away_win": "#55A868",
+    }
+    labels     = ["home_win", "draw", "away_win"]
+    x          = np.arange(len(labels))
+    w          = 0.35
+
+    fig, axes = plt.subplots(n_exp, n_bt,
+                             figsize=(4 * n_bt, 3 * n_exp),
+                             squeeze=False)
+    fig.suptitle("Predicted vs actual outcome distribution",
+                 fontweight="bold", fontsize=12)
+
+    for i, exp in enumerate(experiments):
+        for j, bt in enumerate(BACKTESTS):
+            ax = axes[i][j]
+            df = bt_df(exp, bt)
+
+            if df is None:
+                ax.text(0.5, 0.5, "no data", ha="center", va="center",
+                        transform=ax.transAxes, color="gray")
+            else:
+                actual_pct    = [( df["outcome"]   == o).mean() for o in labels]
+                predicted_pct = [( df["predicted"] == o).mean() for o in labels] \
+                                if "predicted" in df.columns else [np.nan] * 3
+
+                bars_a = ax.bar(x - w / 2, actual_pct,    w, label="actual",
+                                color=[outcome_colors[o] for o in labels], alpha=0.85)
+                bars_p = ax.bar(x + w / 2, predicted_pct, w, label="predicted",
+                                color=[outcome_colors[o] for o in labels], alpha=0.4,
+                                hatch="//")
+
+                for bar, v in zip(bars_a, actual_pct):
+                    ax.text(bar.get_x() + bar.get_width() / 2, v + 0.01,
+                            f"{v:.0%}", ha="center", va="bottom", fontsize=7)
+                for bar, v in zip(bars_p, predicted_pct):
+                    if not np.isnan(v):
+                        ax.text(bar.get_x() + bar.get_width() / 2, v + 0.01,
+                                f"{v:.0%}", ha="center", va="bottom", fontsize=7)
+
+                ax.set_xticks(x)
+                ax.set_xticklabels(["home\nwin", "draw", "away\nwin"], fontsize=8)
+                ax.set_ylim(0, 0.8)
+                ax.yaxis.set_major_formatter(
+                    plt.matplotlib.ticker.PercentFormatter(xmax=1, decimals=0))
+
+            if i == 0:
+                ax.set_title(BT_LABELS[bt], fontsize=10)
+            if j == 0:
+                ax.set_ylabel(short_name(exp["run"]), fontsize=9)
+            if i == 0 and j == 0:
+                ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    save(fig, "04_outcome_distribution.png")
+
+
 # ── Console output ────────────────────────────────────────────────────────────
 
 def print_summary(experiments):
@@ -250,6 +316,7 @@ def main():
     plot_logloss_grouped(experiments)
     plot_logloss_heatmap(experiments)
     plot_draw_distribution(experiments)
+    plot_outcome_distribution(experiments)
     print(f"\nAll plots saved to ./{PLOTS_DIR}/")
 
 
