@@ -21,11 +21,13 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, log_loss
 
 from features import (
-    load_data, build_features,
-    TRAIN_START, MAX_TRAIN,
+    load_data,
+    MAX_TRAIN,
     wc_matches, wc_group_stage, wc_knockout, wc_group_rounds,
 )
-from predict import train, predict_proba, FEATURES
+# predict.py is the single source of truth per branch:
+# it may override FEATURES, TRAIN_START, and build_features
+from predict import train, predict_proba, FEATURES, TRAIN_START, build_features
 
 EXPERIMENTS_LOG = "experiments.jsonl"
 WC2022_START = pd.Timestamp("2022-11-20")
