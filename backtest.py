@@ -26,6 +26,10 @@ from features import (
 # predict.py is the single source of truth per branch:
 # it may override FEATURES, TRAIN_START, and build_features
 from predict import train, predict_proba, FEATURES, TRAIN_START, build_features
+from analyze_backtest import (
+    print_summary, print_diagnostics,
+    plot_logloss_grouped, plot_logloss_heatmap, plot_draw_distribution,
+)
 
 EXPERIMENTS_LOG = "experiments.jsonl"
 WC2022_START    = pd.Timestamp("2022-11-20")
@@ -48,31 +52,30 @@ def git_branch():
         return "unknown"
 
 
+def _bt_entry(result):
+    """Convert an evaluate() result tuple to a jsonl-compatible dict."""
+    if result is None:
+        return None
+    ll, acc, pm = result
+    return {
+        "log_loss":  round(ll, 4),
+        "accuracy":  round(acc, 4),
+        "n_matches": len(pm),
+        "per_match": (pm.assign(date=pm["date"].dt.strftime("%Y-%m-%d"))
+                        .to_dict(orient="records")),
+    }
+
+
 def log_experiment(run_name, bt1, bt2, bt3):
-    """Append BT1/BT2/BT3 results to experiments.jsonl.
-
-    Each btN argument is either None or the (ll, acc, pm) tuple returned by evaluate().
-    """
-    def _entry(result):
-        if result is None:
-            return None
-        ll, acc, pm = result
-        return {
-            "log_loss":  round(ll, 4),
-            "accuracy":  round(acc, 4),
-            "n_matches": len(pm),
-            "per_match": (pm.assign(date=pm["date"].dt.strftime("%Y-%m-%d"))
-                            .to_dict(orient="records")),
-        }
-
+    """Append BT1/BT2/BT3 results to experiments.jsonl."""
     entry = {
         "run":       run_name,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "commit":    git_commit(),
         "features":  FEATURES,
-        "bt1":       _entry(bt1),
-        "bt2":       _entry(bt2),
-        "bt3":       _entry(bt3),
+        "bt1":       _bt_entry(bt1),
+        "bt2":       _bt_entry(bt2),
+        "bt3":       _bt_entry(bt3),
     }
     with open(EXPERIMENTS_LOG, "a") as f:
         f.write(json.dumps(entry) + "\n")
@@ -160,6 +163,21 @@ def main():
         log_experiment(slug, bt1, bt2, bt3)
     else:
         print("\n(pass --run-name <label> to log this experiment)")
+
+    # ── Analyze ───────────────────────────────────────────────────────────────
+    exp = {
+        "run":     slug,
+        "commit":  git_commit(),
+        "bt1":     _bt_entry(bt1),
+        "bt2":     _bt_entry(bt2),
+        "bt3":     _bt_entry(bt3),
+    }
+    print()
+    print_summary([exp])
+    print_diagnostics([exp])
+    plot_logloss_grouped([exp])
+    plot_logloss_heatmap([exp])
+    plot_draw_distribution([exp])
 
 
 if __name__ == "__main__":
