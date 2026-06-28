@@ -6,7 +6,7 @@ from collections import defaultdict
 
 TODAY = pd.Timestamp.now().normalize()
 TRAIN_START = pd.Timestamp("2014-01-01")
-MAX_TRAIN = 10000
+MAX_TRAIN = 3000
 HOME_ADV = 65.0
 DATA       = "results.csv"
 GOALS_DATA = "goalscorers.csv"
@@ -16,12 +16,10 @@ GOALS_URL  = "https://raw.githubusercontent.com/martj42/international_results/ma
 FEATURES = [
     "elo_diff", "home_elo", "away_elo",
     "form5_diff", "form10_diff", "home_form5", "away_form5",
+    "home_rest", "away_rest",
     "home_winrate", "away_winrate",
     "home_gf5", "away_gf5", "home_ga5", "away_ga5", "gd10_diff",
-    "home_streak", "away_streak", "home_rest", "away_rest",
-    "home_played", "away_played",
-    "h2h_n", "h2h_home_winrate", "h2h_draw_rate", "h2h_gd",
-    "neutral", "importance",
+    "home_streak", "away_streak", "home_played", "away_played",
 ]
 
 
@@ -39,6 +37,117 @@ def importance(t):
     if "friendly" in t:
         return 20.0
     return 30.0
+
+
+# ── World Cup context ─────────────────────────────────────────────────────────
+
+_WC_HOSTS = {
+    2026: {"United States", "Canada", "Mexico"},
+    2022: {"Qatar"},
+    2018: {"Russia"},
+    2014: {"Brazil"},
+    2010: {"South Africa"},
+    2006: {"Germany"},
+    2002: {"South Korea", "Japan"},
+    1998: {"France"},
+    1994: {"United States"},
+    1990: {"Italy"},
+    1986: {"Mexico"},
+    1982: {"Spain"},
+    1978: {"Argentina"},
+    1974: {"West Germany"},
+    1970: {"Mexico"},
+    1966: {"England"},
+    1962: {"Chile"},
+    1958: {"Sweden"},
+    1954: {"Switzerland"},
+    1950: {"Brazil"},
+}
+
+_WC_HOST_CONF = {
+    2026: "CONCACAF", 2022: "AFC",      2018: "UEFA",     2014: "CONMEBOL",
+    2010: "CAF",      2006: "UEFA",     2002: "AFC",      1998: "UEFA",
+    1994: "CONCACAF", 1990: "UEFA",     1986: "CONCACAF", 1982: "UEFA",
+    1978: "CONMEBOL", 1974: "UEFA",     1970: "CONCACAF", 1966: "UEFA",
+    1962: "CONMEBOL", 1958: "UEFA",     1954: "UEFA",     1950: "CONMEBOL",
+}
+
+_TEAM_CONF = {
+    **{t: "UEFA" for t in [
+        "France", "Germany", "West Germany", "German DR", "Yugoslavia",
+        "Spain", "England", "Italy", "Portugal", "Netherlands", "Belgium",
+        "Croatia", "Poland", "Switzerland", "Denmark", "Sweden", "Norway",
+        "Serbia", "Ukraine", "Russia", "Soviet Union", "Austria",
+        "Czech Republic", "Czechoslovakia", "Hungary", "Romania", "Bulgaria",
+        "Slovakia", "Slovenia", "Greece", "Turkey", "Scotland", "Wales",
+        "Israel", "Northern Ireland", "Republic of Ireland", "Finland",
+        "Iceland", "North Macedonia", "Albania", "Bosnia and Herzegovina",
+        "Montenegro", "Georgia", "Armenia", "Azerbaijan", "Kosovo",
+        "Luxembourg", "Estonia", "Latvia", "Lithuania", "Belarus",
+        "Moldova", "Faroe Islands", "Malta", "Cyprus", "Andorra",
+        "Liechtenstein", "San Marino", "Gibraltar",
+    ]},
+    **{t: "CONMEBOL" for t in [
+        "Brazil", "Argentina", "Uruguay", "Colombia", "Chile", "Peru",
+        "Ecuador", "Paraguay", "Bolivia", "Venezuela",
+    ]},
+    **{t: "CONCACAF" for t in [
+        "United States", "Canada", "Mexico", "Costa Rica", "Honduras",
+        "Panama", "Jamaica", "El Salvador", "Trinidad and Tobago",
+        "Guatemala", "Haiti", "Cuba", "Belize", "Nicaragua",
+        "Dominican Republic", "Barbados", "Bermuda", "Guyana",
+        "Grenada", "Suriname", "Curacao", "Curaçao",
+    ]},
+    **{t: "AFC" for t in [
+        "Japan", "South Korea", "Iran", "Saudi Arabia", "Australia",
+        "Qatar", "China", "Iraq", "United Arab Emirates", "UAE",
+        "Oman", "Bahrain", "Kuwait", "Jordan", "Lebanon", "Syria",
+        "Vietnam", "Thailand", "Indonesia", "Malaysia", "Philippines",
+        "India", "Uzbekistan", "Kyrgyzstan", "Tajikistan", "Yemen",
+        "Palestine", "North Korea",
+    ]},
+    **{t: "CAF" for t in [
+        "Senegal", "Morocco", "Nigeria", "Ghana", "Cameroon", "Tunisia",
+        "Algeria", "Egypt", "Ivory Coast", "Côte d'Ivoire",
+        "South Africa", "Mali", "Burkina Faso",
+        "DR Congo", "Democratic Republic of the Congo",
+        "Zambia", "Zimbabwe", "Tanzania", "Kenya", "Ethiopia",
+        "Uganda", "Angola", "Mozambique", "Namibia", "Benin",
+        "Guinea", "Guinea-Bissau", "Liberia", "Sierra Leone", "Togo",
+        "Gabon", "Equatorial Guinea", "Congo", "Botswana",
+        "Cape Verde", "Comoros", "Gambia", "Libya", "Mauritania",
+        "Niger", "Rwanda", "Sudan", "South Sudan",
+    ]},
+    **{t: "OFC" for t in [
+        "New Zealand", "Fiji", "Papua New Guinea", "Vanuatu",
+        "Solomon Islands", "Tahiti", "New Caledonia",
+    ]},
+}
+
+
+def _wc_context(home, away, tournament, year):
+    """Return (host_adv_diff, concacaf_adv_diff, same_continent_adv_diff).
+    All three are 0 for non-WC matches.
+    """
+    t = tournament.lower()
+    if "fifa world cup" not in t or "qualif" in t:
+        return 0, 0, 0
+
+    hosts     = _WC_HOSTS.get(year, set())
+    host_conf = _WC_HOST_CONF.get(year)
+    h_conf    = _TEAM_CONF.get(home)
+    a_conf    = _TEAM_CONF.get(away)
+
+    host_adv  = int(home in hosts)      - int(away in hosts)
+    same_cont = (int(h_conf == host_conf) - int(a_conf == host_conf)) if host_conf else 0
+
+    # CONCACAF advantage: active only when WC is hosted in CONCACAF territory
+    if host_conf == "CONCACAF":
+        concacaf_adv = int(h_conf == "CONCACAF") - int(a_conf == "CONCACAF")
+    else:
+        concacaf_adv = 0
+
+    return host_adv, concacaf_adv, same_cont
 
 
 def _fix_et_scores(df, refresh=False):
@@ -155,8 +264,11 @@ def build_features(df):
         he, hf5, hf10, hwr, hgf, hga, hgd, hstk, hn = team_feats(h)
         ae, af5, af10, awr, agf, aga, agd, astk, an = team_feats(a)
         nm, h2h_wr, h2h_dr, h2h_gd = h2h_feats(h, a)
+        elo_d = he + adj - ae
+        host_adv, concacaf_adv, same_cont_adv = _wc_context(h, a, r.tournament, r.date.year)
         rows.append({
-            "elo_diff": he + adj - ae, "home_elo": he, "away_elo": ae,
+            "elo_diff": elo_d, "home_elo": he, "away_elo": ae,
+            "abs_elo_diff": abs(elo_d),
             "form5_diff": hf5 - af5, "form10_diff": hf10 - af10,
             "home_form5": hf5, "away_form5": af5,
             "home_winrate": hwr, "away_winrate": awr,
@@ -166,6 +278,9 @@ def build_features(df):
             "away_rest": min((r.date - last_date[a]).days, 90) if a in last_date else 30,
             "home_played": hn, "away_played": an,
             "h2h_n": nm, "h2h_home_winrate": h2h_wr, "h2h_draw_rate": h2h_dr, "h2h_gd": h2h_gd,
+            "host_adv_diff": host_adv,
+            "concacaf_adv_diff": concacaf_adv,
+            "same_continent_adv_diff": same_cont_adv,
         })
 
         if not np.isnan(r.home_score):
