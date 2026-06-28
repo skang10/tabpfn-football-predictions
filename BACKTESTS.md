@@ -28,6 +28,8 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | wc_context_features | exp_0628/wc_context_features | main | 1.1241 | 0.9321 | 0.9259 | 47.9% | 56.2% | 58.3% | 4222893 | +abs_elo_diff, host_adv_diff, concacaf_adv_diff, same_continent_adv_diff → 30 features |
 | symmetric_features | exp_0628/symmetric_features | exp_0628/wc_context_features | 1.1280 | 0.9530 | 0.9290 | 47.9% | 56.2% | 58.3% | ec65f5f | replaced 8 home/away individual features with 4 diffs → 26 features; regressed vs wc_context |
 | lightweight_20feat | exp_0628/lightweight_20feat | exp_0628/ablation · abl_elo_form_homeaway | 1.1346 | 0.9321 | 0.9302 | <u>50.0%</u> | 56.2% | 58.3% | 6826053 | Elo + form + rest + home/away stats; no H2H / ctx / WC — best feature-rich TabPFN on BT2 |
+| tw_m3000 | exp_0628/train_window | exp_0628/lightweight_20feat | 1.1601 | **0.9075** | 0.9428 | <u>50.0%</u> | 56.2% | 64.6% | bf8d22c | 20 features + MAX_TRAIN=3000; TRAIN_START irrelevant (pool always capped at 3000) |
+| tw_s2018_m10000 | exp_0628/train_window | exp_0628/lightweight_20feat | 1.1458 | 0.9191 | **0.9290** | <u>50.0%</u> | 56.2% | 58.3% | bf8d22c | 20 features + TRAIN_START=2018 + MAX_TRAIN=10000; best BT3 so far |
 
 ### Key observations
 
@@ -84,6 +86,45 @@ Cumulative feature sets (each row adds to the previous), then targeted removals 
 | + H2H | ↓ (hurts) | ↑ (helps) | mixed |
 | + WC context | ↓ (hurts) | ↓ (hurts) | hurts on recent data |
 | + streak | ↓ (hurts) | ↑ (helps) | mixed |
+
+---
+
+## Training window experiment (exp_0628/train_window, 20-feature set)
+
+Branch: `exp_0628/train_window` · Parent: `exp_0628/lightweight_20feat` · commit bf8d22c
+
+Fixed 20-feature set. Grid: TRAIN_START ∈ {2010, 2014, 2018} × MAX_TRAIN ∈ {3000, 5000, 10000}.
+`n22` / `n26` = actual matches used for BT1/BT2 and BT3 training pools respectively.
+
+| config | start | max | n22 | n26 | BT1 ll | BT2 ll | BT3 ll | BT1 acc | BT2 acc | BT3 acc |
+|--------|:-----:|----:|----:|----:|:------:|:------:|:------:|:-------:|:-------:|:-------:|
+| s2010_m3000 | 2010 | 3000 | 3000 | 3000 | 1.1601 | **0.9075** | 0.9428 | <u>50.0%</u> | 56.2% | <u>64.6%</u> |
+| s2010_m5000 | 2010 | 5000 | 5000 | 5000 | 1.1466 | 0.9238 | 0.9347 | <u>50.0%</u> | 56.2% | <u>64.6%</u> |
+| s2010_m10000 | 2010 | 10000 | 10000 | 10000 | 1.1400 | 0.9301 | 0.9302 | <u>50.0%</u> | 56.2% | 58.3% |
+| s2014_m3000 | 2014 | 3000 | 3000 | 3000 | 1.1601 | **0.9075** | 0.9428 | <u>50.0%</u> | 56.2% | <u>64.6%</u> |
+| s2014_m5000 | 2014 | 5000 | 5000 | 5000 | 1.1466 | 0.9238 | 0.9347 | <u>50.0%</u> | 56.2% | <u>64.6%</u> |
+| s2014_m10000 | 2014 | 10000 | 8142 | 10000 | 1.1346 | 0.9321 | 0.9302 | <u>50.0%</u> | 56.2% | 58.3% |
+| s2018_m3000 | 2018 | 3000 | 3000 | 3000 | 1.1601 | **0.9075** | 0.9428 | <u>50.0%</u> | 56.2% | <u>64.6%</u> |
+| s2018_m5000 | 2018 | 5000 | 4403 | 5000 | 1.1458 | 0.9191 | 0.9347 | <u>50.0%</u> | 56.2% | <u>64.6%</u> |
+| s2018_m10000 | 2018 | 10000 | 4403 | 8108 | 1.1458 | 0.9191 | **0.9290** | <u>50.0%</u> | 56.2% | 58.3% |
+
+### Training window findings
+
+**TRAIN_START 没有独立效果 — MAX_TRAIN 才是决定性变量：**
+- s2010_m3000、s2014_m3000、s2018_m3000 结果完全相同（n22 都被 MAX_TRAIN=3000 截断）
+- TRAIN_START 只在可用数据量 < MAX_TRAIN 时才产生作用（如 s2018_m10000：pre-WC2022 仅 4403 场）
+
+**BT2（淘汰赛）：MAX_TRAIN=3000 最优（0.9075）**
+- 比 MAX_TRAIN=10000（0.9321）好 0.025 — 差距显著
+- 解释：最近 3000 场 ≈ 2019–2022，更能反映当前球队状态；数据越多越稀释近期信号
+- s2018_m5000/10000（0.9191）介于两者之间，印证了"近期数据"的价值
+
+**BT3（小组赛）：MAX_TRAIN=10000 最优（s2018_m10000 = 0.9290）**
+- MAX_TRAIN=3000 最差（0.9428）；更多数据对小组赛始终有帮助
+- s2018_m10000（0.9290）略好于 s2014_m10000（0.9302）
+
+**核心张力：** 淘汰赛偏好小数据集（近期精炼），小组赛偏好大数据集（更多样本）。
+对于比赛目标（淘汰赛）→ MAX_TRAIN=3000 是关键调整。
 
 ---
 
