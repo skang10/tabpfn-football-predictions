@@ -8,8 +8,10 @@ TODAY = pd.Timestamp.now().normalize()
 TRAIN_START = pd.Timestamp("2014-01-01")
 MAX_TRAIN = 10000
 HOME_ADV = 65.0
-DATA = "results.csv"
-RAW_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+DATA       = "results.csv"
+GOALS_DATA = "goalscorers.csv"
+RAW_URL    = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+GOALS_URL  = "https://raw.githubusercontent.com/martj42/international_results/master/goalscorers.csv"
 
 FEATURES = [
     "elo_diff", "home_elo", "away_elo",
@@ -39,6 +41,62 @@ def importance(t):
     return 30.0
 
 
+def _fix_et_scores(df, refresh=False):
+    """Replace ET-inflated scores with 90-minute scores using goalscorers data.
+
+    Knockout matches decided by an ET goal are recorded with the post-ET score,
+    but the competition rules (and our backtest labels) use 90-minute results only.
+    Matches that went to penalties are already correct (still level after ET).
+    """
+    if refresh or not os.path.exists(GOALS_DATA):
+        goals = pd.read_csv(GOALS_URL)
+        goals.to_csv(GOALS_DATA, index=False)
+    else:
+        goals = pd.read_csv(GOALS_DATA)
+
+    goals["date"]     = pd.to_datetime(goals["date"])
+    goals["own_goal"] = goals["own_goal"].astype(str).str.upper().eq("TRUE")
+    goals             = goals.dropna(subset=["minute"])
+
+    et_keys = set(
+        zip(goals.loc[goals["minute"] > 90, "date"].astype(str),
+            goals.loc[goals["minute"] > 90, "home_team"],
+            goals.loc[goals["minute"] > 90, "away_team"])
+    )
+    if not et_keys:
+        return df
+
+    g90 = goals[goals["minute"] <= 90].copy()
+    g90["home_goal"] = (
+        (g90["team"] == g90["home_team"]) & ~g90["own_goal"]
+    ) | (
+        (g90["team"] == g90["away_team"]) & g90["own_goal"]
+    )
+    g90["away_goal"] = (
+        (g90["team"] == g90["away_team"]) & ~g90["own_goal"]
+    ) | (
+        (g90["team"] == g90["home_team"]) & g90["own_goal"]
+    )
+
+    scores90 = (
+        g90.groupby(["date", "home_team", "away_team"])
+           .agg(home_score_90=("home_goal", "sum"),
+                away_score_90=("away_goal", "sum"))
+           .reset_index()
+    )
+
+    df = df.copy()
+    df["_key"] = list(zip(df["date"].astype(str), df["home_team"], df["away_team"]))
+    mask = df["_key"].apply(lambda k: k in et_keys)
+
+    fixed = df[mask].merge(scores90, on=["date", "home_team", "away_team"], how="left")
+    df.loc[mask, "home_score"] = fixed["home_score_90"].fillna(0).values
+    df.loc[mask, "away_score"] = fixed["away_score_90"].fillna(0).values
+
+    print(f"  [ET fix] corrected {mask.sum()} match(es) to 90-minute scores")
+    return df.drop(columns=["_key"])
+
+
 def load_data(refresh=False):
     if refresh or not os.path.exists(DATA):
         df = pd.read_csv(RAW_URL)
@@ -50,6 +108,7 @@ def load_data(refresh=False):
     df["neutral"] = df["neutral"].astype(str).str.upper().eq("TRUE").astype(int)
     df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce")
     df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce")
+    df = _fix_et_scores(df, refresh=refresh)
     df["outcome"] = np.select(
         [df["home_score"] > df["away_score"], df["home_score"] < df["away_score"]],
         ["home_win", "away_win"], default="draw")

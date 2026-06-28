@@ -1,5 +1,7 @@
 results.csv
+goalscorers.csv
 predictions/
+predictions_*.csv
 experiments.jsonl
 plots/
 __pycache__/
