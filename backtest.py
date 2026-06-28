@@ -11,6 +11,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import subprocess
 from datetime import datetime
 
@@ -72,8 +73,24 @@ def _bt_entry(result):
     }
 
 
+def _upsert_experiment(run_name, entry):
+    """Write entry to experiments.jsonl, replacing any existing row with the same run name."""
+    existing = []
+    if os.path.exists(EXPERIMENTS_LOG):
+        with open(EXPERIMENTS_LOG) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    existing.append(json.loads(line))
+    existing = [e for e in existing if e.get("run") != run_name]
+    existing.append(entry)
+    with open(EXPERIMENTS_LOG, "w") as f:
+        for e in existing:
+            f.write(json.dumps(e) + "\n")
+
+
 def log_experiment(run_name, bt1, bt2, bt3):
-    """Append BT1/BT2/BT3 results to experiments.jsonl."""
+    """Write BT1/BT2/BT3 results to experiments.jsonl, overwriting same run name."""
     entry = {
         "run":       run_name,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -83,8 +100,7 @@ def log_experiment(run_name, bt1, bt2, bt3):
         "bt2":       _bt_entry(bt2),
         "bt3":       _bt_entry(bt3),
     }
-    with open(EXPERIMENTS_LOG, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    _upsert_experiment(run_name, entry)
     print(f"Logged to {EXPERIMENTS_LOG} (run='{run_name}', commit={entry['commit']})")
 
 

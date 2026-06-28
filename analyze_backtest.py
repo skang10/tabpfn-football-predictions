@@ -166,12 +166,21 @@ def plot_draw_distribution(experiments):
                 non_draws = df[df["outcome"] != "draw"]["p_draw"]
 
                 if len(draws) > 1:
-                    draws.plot.kde(ax=ax, color="#DD8452", linewidth=2,
-                                   label=f"draw (n={len(draws)})")
+                    try:
+                        draws.plot.kde(ax=ax, color="#DD8452", linewidth=2,
+                                       label=f"draw (n={len(draws)})")
+                    except Exception:
+                        ax.axvline(draws.mean(), color="#DD8452", linewidth=2,
+                                   label=f"draw (n={len(draws)}, fixed)")
                 if len(non_draws) > 1:
-                    non_draws.plot.kde(ax=ax, color="#4C72B0", linewidth=2,
-                                       linestyle="--",
-                                       label=f"non-draw (n={len(non_draws)})")
+                    try:
+                        non_draws.plot.kde(ax=ax, color="#4C72B0", linewidth=2,
+                                           linestyle="--",
+                                           label=f"non-draw (n={len(non_draws)})")
+                    except Exception:
+                        ax.axvline(non_draws.mean(), color="#4C72B0", linewidth=2,
+                                   linestyle="--",
+                                   label=f"non-draw (n={len(non_draws)}, fixed)")
 
                 ax.set_xlim(0, 0.6)
                 ax.set_ylim(bottom=0)
