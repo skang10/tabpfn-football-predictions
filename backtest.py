@@ -104,7 +104,7 @@ def log_experiment(run_name, bt1, bt2, bt3):
     print(f"Logged to {EXPERIMENTS_LOG} (run='{run_name}', commit={entry['commit']})")
 
 
-def evaluate(label, test, model):
+def evaluate(label, test, model, draw_scale: float = 1.0):
     """Evaluate model on test matches; print metrics and return result dict."""
     if not len(test):
         print(f"\n{label}: no matches found")
@@ -113,6 +113,12 @@ def evaluate(label, test, model):
     X = test[FEATURES].values
     proba_df = predict_proba(model, X)
     proba_df = proba_df / proba_df.sum(axis=1).values[:, None]  # ensure sum-to-1
+
+    if draw_scale != 1.0:
+        hda = proba_df[["p_home_win", "p_draw", "p_away_win"]].values.copy()
+        hda[:, 1] *= draw_scale
+        hda /= hda.sum(axis=1, keepdims=True)
+        proba_df = pd.DataFrame(hda, columns=["p_home_win", "p_draw", "p_away_win"])
 
     # sklearn log_loss needs columns in lexicographic label order
     proba_lex = proba_df[["p_away_win", "p_draw", "p_home_win"]].values
@@ -180,8 +186,10 @@ def evaluate(label, test, model):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--refresh",  action="store_true", help="Re-download dataset")
-    parser.add_argument("--run-name", default=None, help="Label for experiments.jsonl")
+    parser.add_argument("--refresh",    action="store_true", help="Re-download dataset")
+    parser.add_argument("--run-name",   default=None, help="Label for experiments.jsonl")
+    parser.add_argument("--draw-scale", type=float, default=1.0,
+                        help="Multiply p_draw by this factor then renormalize (default 1.0)")
     args = parser.parse_args()
 
     df = load_data(refresh=args.refresh)
@@ -202,8 +210,8 @@ def main():
         pool22 = played[played["date"] < WC2022_START].tail(MAX_TRAIN)
         print(f"\nTraining on {len(pool22)} matches (pre-WC2022) ...")
         model22 = train(pool22)
-        bt1 = evaluate("BT1 — WC 2022 group stage", wc_group_stage(wc22_all), model22)
-        bt2 = evaluate("BT2 — WC 2022 knockout",    wc_knockout(wc22_all),    model22)
+        bt1 = evaluate("BT1 — WC 2022 group stage", wc_group_stage(wc22_all), model22, args.draw_scale)
+        bt2 = evaluate("BT2 — WC 2022 knockout",    wc_knockout(wc22_all),    model22, args.draw_scale)
     else:
         print("\nNo WC2022 matches found (try --refresh).")
 
@@ -214,7 +222,7 @@ def main():
         pool26 = played[played["date"] < WC2026_START].tail(MAX_TRAIN)
         print(f"\nTraining on {len(pool26)} matches (pre-WC2026) ...")
         model26 = train(pool26)
-        bt3 = evaluate("BT3 — WC 2026 group rounds 1-2", wc26_r12, model26)
+        bt3 = evaluate("BT3 — WC 2026 group rounds 1-2", wc26_r12, model26, args.draw_scale)
     else:
         print("\nNo WC2026 group-stage results yet (try --refresh).")
 
