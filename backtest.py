@@ -159,6 +159,15 @@ def evaluate(label, test, model):
     pm["p_true"]     = true_probs.round(3)
     pm["correct"]    = pm["outcome"] == pm["predicted"]
 
+    wrong = pm[~pm["correct"]].copy()
+    if len(wrong):
+        print(f"  wrong predictions ({len(wrong)}):")
+        for r in wrong.itertuples():
+            date = r.date.date() if hasattr(r.date, "date") else r.date
+            print(f"    {date}  {r.home_team:>22} vs {r.away_team:<22}"
+                  f"  actual={r.outcome:<9}  pred={r.predicted:<9}"
+                  f"  H {r.p_home_win:.2f} D {r.p_draw:.2f} A {r.p_away_win:.2f}")
+
     return {
         "ll":                    ll,
         "acc":                   acc,
