@@ -41,6 +41,28 @@ def predict_proba(model, X):
     })
 
 
+def _round_probs_2dp(probs):
+    """Round H/D/A probabilities to 2 decimals while preserving a 1.00 row sum."""
+    rounded = []
+    for row in probs:
+        cents = np.floor(row * 100).astype(int)
+        remainder = int(100 - cents.sum())
+        fractions = row * 100 - cents
+        for idx in np.argsort(-fractions)[:remainder]:
+            cents[idx] += 1
+
+        zero_idx = np.where(cents == 0)[0]
+        for idx in zero_idx:
+            donor = int(np.argmax(cents))
+            if cents[donor] <= 1:
+                break
+            cents[idx] = 1
+            cents[donor] -= 1
+
+        rounded.append(cents / 100)
+    return np.array(rounded)
+
+
 def _git_branch():
     try:
         branch = subprocess.check_output(
@@ -58,6 +80,8 @@ def main():
     parser.add_argument("--draw-scale", type=float, default=1.0,
                         help="Multiply p_draw by this factor then renormalize (default 1.0). "
                              "Use 1.2 for knockout-stage submissions.")
+    parser.add_argument("--output-dir", default="predictions",
+                        help="Directory for generated submission CSVs (default: predictions).")
     args = parser.parse_args()
 
     from_date = pd.Timestamp(args.date) if args.date else TODAY
@@ -65,7 +89,8 @@ def main():
     df    = load_data(refresh=args.refresh)
     feats = build_features(df)
     played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
-    future = feats[feats["home_score"].isna() & (feats["date"] >= from_date)].sort_values("date")
+    # Keep the fixture order from results.csv/load_data instead of re-sorting here.
+    future = feats[feats["home_score"].isna() & (feats["date"] >= from_date)]
 
     if not len(future):
         print("No upcoming fixtures — run with --refresh to fetch latest data.")
@@ -73,8 +98,8 @@ def main():
 
     today_str  = datetime.now().strftime("%Y%m%d")
     scale_tag  = f"_ds{args.draw_scale:.1f}".replace(".", "") if args.draw_scale != 1.0 else ""
-    filename   = f"predictions/submission_{_git_branch()}{scale_tag}_{today_str}.csv"
-    os.makedirs("predictions", exist_ok=True)
+    filename   = os.path.join(args.output_dir, f"submission_{_git_branch()}{scale_tag}_{today_str}.csv")
+    os.makedirs(args.output_dir, exist_ok=True)
 
     model     = train(played.tail(MAX_TRAIN))
     proba_df  = predict_proba(model, future[FEATURES].values)
@@ -89,11 +114,12 @@ def main():
     predicted = label_arr[hda.argmax(1)]
 
     # Submission format: date, home_team, away_team, p_home_win, p_draw, p_away_win (2 dp, sums to 1)
-    ph_raw, pd_raw, pa_raw = hda[:, 0], hda[:, 1], hda[:, 2]
+    rounded_hda = _round_probs_2dp(hda)
+    ph_raw, pd_raw, pa_raw = rounded_hda[:, 0], rounded_hda[:, 1], rounded_hda[:, 2]
     out = future[["date", "home_team", "away_team"]].copy()
-    out["p_home_win"] = ph_raw.round(2)
-    out["p_draw"]     = pd_raw.round(2)
-    out["p_away_win"] = pa_raw.round(2)
+    out["p_home_win"] = ph_raw
+    out["p_draw"]     = pd_raw
+    out["p_away_win"] = pa_raw
 
     out.to_csv(filename, index=False, float_format="%.2f")
     print(f"\n{len(out)} fixture predictions -> {filename}\n")
