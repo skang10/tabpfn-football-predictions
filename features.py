@@ -15,15 +15,11 @@ GOALS_URL  = "https://raw.githubusercontent.com/martj42/international_results/ma
 
 FEATURES = [
     "elo_diff", "home_elo", "away_elo",
-    "abs_elo_diff",
     "form5_diff", "form10_diff", "home_form5", "away_form5",
+    "home_rest", "away_rest",
     "home_winrate", "away_winrate",
     "home_gf5", "away_gf5", "home_ga5", "away_ga5", "gd10_diff",
-    "home_streak", "away_streak", "home_rest", "away_rest",
-    "home_played", "away_played",
-    "h2h_n", "h2h_home_winrate", "h2h_draw_rate", "h2h_gd",
-    "neutral", "importance",
-    "host_adv_diff", "concacaf_adv_diff", "same_continent_adv_diff",
+    "home_streak", "away_streak", "home_played", "away_played",
 ]
 
 
