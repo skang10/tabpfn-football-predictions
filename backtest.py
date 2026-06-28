@@ -30,6 +30,7 @@ from analyze_backtest import (
     print_summary, print_diagnostics,
     plot_logloss_grouped, plot_logloss_heatmap,
     plot_draw_distribution, plot_outcome_distribution,
+    plot_calibration_curve,
 )
 
 EXPERIMENTS_LOG = "experiments.jsonl"
@@ -54,16 +55,20 @@ def git_branch():
 
 
 def _bt_entry(result):
-    """Convert an evaluate() result tuple to a jsonl-compatible dict."""
+    """Convert an evaluate() result dict to a jsonl-compatible dict."""
     if result is None:
         return None
-    ll, acc, pm = result
+    pm = result["pm"]
+    dr = result["draw_recall"]
     return {
-        "log_loss":  round(ll, 4),
-        "accuracy":  round(acc, 4),
-        "n_matches": len(pm),
-        "per_match": (pm.assign(date=pm["date"].dt.strftime("%Y-%m-%d"))
-                        .to_dict(orient="records")),
+        "log_loss":              round(result["ll"], 4),
+        "accuracy":              round(result["acc"], 4),
+        "draw_recall":           round(dr, 4) if not np.isnan(dr) else None,
+        "mean_p_draw":           round(result["mean_p_draw"], 4),
+        "true_outcome_avg_prob": round(result["true_outcome_avg_prob"], 4),
+        "n_matches":             len(pm),
+        "per_match":             (pm.assign(date=pm["date"].dt.strftime("%Y-%m-%d"))
+                                    .to_dict(orient="records")),
     }
 
 
@@ -84,7 +89,7 @@ def log_experiment(run_name, bt1, bt2, bt3):
 
 
 def evaluate(label, test, model):
-    """Evaluate model on test matches; print metrics and return (ll, acc, per_match_df)."""
+    """Evaluate model on test matches; print metrics and return result dict."""
     if not len(test):
         print(f"\n{label}: no matches found")
         return None
@@ -102,21 +107,46 @@ def evaluate(label, test, model):
     pred = label_arr[proba_hda.argmax(1)]
     acc  = accuracy_score(test["outcome"], pred)
 
-    draws_actual = (test["outcome"] == "draw").sum()
-    draws_pred   = (pred == "draw").sum()
+    actual       = test["outcome"].values
+    draws_actual = (actual == "draw").sum()
+    draws_pred   = (pred   == "draw").sum()
+    draw_recall  = (((pred == "draw") & (actual == "draw")).sum() / draws_actual
+                    if draws_actual else np.nan)
+
+    mean_p_draw = proba_df["p_draw"].mean()
+
+    outcome_to_p = {
+        "home_win": proba_df["p_home_win"].values,
+        "draw":     proba_df["p_draw"].values,
+        "away_win": proba_df["p_away_win"].values,
+    }
+    true_probs = np.array([outcome_to_p[o][i] for i, o in enumerate(actual)])
+    true_outcome_avg_prob = true_probs.mean()
 
     print(f"\n── {label} ({len(test)} matches) ──")
-    print(f"  log-loss  {ll:.4f}")
-    print(f"  accuracy  {acc:.1%}")
-    print(f"  draws: {draws_actual} actual / {draws_pred} predicted")
+    print(f"  log-loss              {ll:.4f}")
+    print(f"  accuracy              {acc:.1%}")
+    dr_str = f"{draw_recall:.1%}" if not np.isnan(draw_recall) else "—"
+    print(f"  draw recall           {dr_str}  ({draws_actual} actual / {draws_pred} predicted)")
+    print(f"  mean p(draw)          {mean_p_draw:.3f}")
+    print(f"  true outcome avg prob {true_outcome_avg_prob:.3f}")
 
     pm = test[["date", "home_team", "away_team", "outcome"]].copy()
     pm["predicted"]  = pred
     pm["p_home_win"] = proba_df["p_home_win"].round(3).values
     pm["p_draw"]     = proba_df["p_draw"].round(3).values
     pm["p_away_win"] = proba_df["p_away_win"].round(3).values
+    pm["p_true"]     = true_probs.round(3)
     pm["correct"]    = pm["outcome"] == pm["predicted"]
-    return ll, acc, pm
+
+    return {
+        "ll":                    ll,
+        "acc":                   acc,
+        "draw_recall":           draw_recall,
+        "mean_p_draw":           mean_p_draw,
+        "true_outcome_avg_prob": true_outcome_avg_prob,
+        "pm":                    pm,
+    }
 
 
 def main():
@@ -180,6 +210,7 @@ def main():
     plot_logloss_heatmap([exp])
     plot_draw_distribution([exp])
     plot_outcome_distribution([exp])
+    plot_calibration_curve([exp])
 
 
 if __name__ == "__main__":

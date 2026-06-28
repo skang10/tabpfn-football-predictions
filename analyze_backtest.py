@@ -1,13 +1,15 @@
 """Analyze experiment results from experiments.jsonl (bt1/bt2/bt3 schema).
 
 Console output:
-  - Summary table: experiment × BT → log-loss, accuracy, draw stats
+  - Summary table: experiment × BT → log-loss, accuracy, draw recall
   - probability_diagnostics() per experiment per BT
 
 Plots:
   01_logloss_grouped.png   — grouped bar chart, experiments × BT
   02_logloss_heatmap.png   — heatmap, experiments × BT
   03_draw_distribution.png — P(draw) KDE: actual draws vs non-draws per experiment per BT
+  04_outcome_distribution.png — predicted vs actual outcome distribution
+  05_calibration_curve.png — calibration curves per outcome per experiment per BT
 
 Usage:
     uv run analyze_backtest.py [--runs <slug> ...]
@@ -20,6 +22,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.calibration import calibration_curve
 
 BACKTESTS = ["bt1", "bt2", "bt3"]
 BT_LABELS = {
@@ -252,14 +255,71 @@ def plot_outcome_distribution(experiments):
     save(fig, "04_outcome_distribution.png")
 
 
+# ── Plot 5: calibration curves ───────────────────────────────────────────────
+
+def plot_calibration_curve(experiments):
+    """For each experiment × BT: calibration curve per outcome (predicted prob vs actual freq)."""
+    n_exp = len(experiments)
+    n_bt  = len(BACKTESTS)
+
+    outcome_colors = {"home_win": "#4C72B0", "draw": "#DD8452", "away_win": "#55A868"}
+    outcome_labels = {"home_win": "home win", "draw": "draw", "away_win": "away win"}
+    p_cols = {"home_win": "p_home_win", "draw": "p_draw", "away_win": "p_away_win"}
+
+    fig, axes = plt.subplots(n_exp, n_bt,
+                             figsize=(4 * n_bt, 3.5 * n_exp),
+                             squeeze=False)
+    fig.suptitle("Calibration curves — predicted probability vs actual frequency",
+                 fontweight="bold", fontsize=12)
+
+    for i, exp in enumerate(experiments):
+        for j, bt in enumerate(BACKTESTS):
+            ax  = axes[i][j]
+            df  = bt_df(exp, bt)
+
+            if df is None or not {"p_home_win", "p_draw", "p_away_win"}.issubset(df.columns):
+                ax.text(0.5, 0.5, "no data", ha="center", va="center",
+                        transform=ax.transAxes, color="gray")
+            else:
+                n_bins = 4 if len(df) < 30 else 5
+                for outcome, col in p_cols.items():
+                    y_true = (df["outcome"] == outcome).astype(int).values
+                    y_prob = df[col].values
+                    try:
+                        frac, mean_p = calibration_curve(
+                            y_true, y_prob, n_bins=n_bins, strategy="quantile")
+                        ax.plot(mean_p, frac, marker="o", linewidth=1.5,
+                                color=outcome_colors[outcome],
+                                label=outcome_labels[outcome])
+                    except ValueError:
+                        pass
+
+                ax.plot([0, 1], [0, 1], "k--", linewidth=0.8, label="perfect")
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+
+            if i == n_exp - 1:
+                ax.set_xlabel("Mean predicted probability")
+            if j == 0:
+                ax.set_ylabel(short_name(exp["run"]), fontsize=9)
+            if i == 0:
+                ax.set_title(BT_LABELS[bt], fontsize=10)
+            if i == 0 and j == 0:
+                ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    save(fig, "05_calibration_curve.png")
+
+
 # ── Console output ────────────────────────────────────────────────────────────
 
 def print_summary(experiments):
-    print(f"\n{'=' * 70}")
+    print(f"\n{'=' * 84}")
     print(f"  {'experiment':<28}  "
           f"{'BT1 ll':>7} {'BT2 ll':>7} {'BT3 ll':>7}  "
-          f"{'BT1 acc':>7} {'BT2 acc':>7} {'BT3 acc':>7}")
-    print(f"  {'-' * 66}")
+          f"{'BT1 acc':>7} {'BT2 acc':>7} {'BT3 acc':>7}  "
+          f"{'BT1 dr':>7} {'BT2 dr':>7} {'BT3 dr':>7}")
+    print(f"  {'-' * 80}")
     for e in experiments:
         name    = short_name(e["run"])
         ll_cols = "  ".join(
@@ -268,7 +328,11 @@ def print_summary(experiments):
         acc_cols = "  ".join(
             f"{e[bt]['accuracy']:>6.1%}" if e.get(bt) else f"{'—':>7}"
             for bt in BACKTESTS)
-        print(f"  {name:<28}  {ll_cols}  {acc_cols}")
+        dr_cols = "  ".join(
+            (f"{e[bt]['draw_recall']:>6.1%}" if e[bt].get("draw_recall") is not None
+             else f"{'—':>7}") if e.get(bt) else f"{'—':>7}"
+            for bt in BACKTESTS)
+        print(f"  {name:<28}  {ll_cols}  {acc_cols}  {dr_cols}")
 
 
 def print_diagnostics(experiments):
@@ -282,9 +346,17 @@ def print_diagnostics(experiments):
             d            = e[bt]
             draws_pred   = (df["predicted"] == "draw").sum() if "predicted" in df.columns else "?"
             draws_actual = (df["outcome"]   == "draw").sum()
-            print(f"\n  {BT_LABELS[bt]} — log-loss {d['log_loss']:.4f} | "
+            dr = d.get("draw_recall")
+            dr_str = f"{dr:.1%}" if dr is not None else "—"
+            mp = d.get("mean_p_draw")
+            mp_str = f"{mp:.3f}" if mp is not None else "—"
+            tp = d.get("true_outcome_avg_prob")
+            tp_str = f"{tp:.3f}" if tp is not None else "—"
+            print(f"\n  {BT_LABELS[bt]} — "
+                  f"log-loss {d['log_loss']:.4f} | "
                   f"accuracy {d['accuracy']:.1%} | "
-                  f"draws {draws_actual} actual / {draws_pred} predicted")
+                  f"draw recall {dr_str} ({draws_actual} actual / {draws_pred} predicted)")
+            print(f"    mean p(draw): {mp_str}   true outcome avg prob: {tp_str}")
             diag = probability_diagnostics(df)
             if diag is not None:
                 print(diag.to_string())
@@ -317,6 +389,7 @@ def main():
     plot_logloss_heatmap(experiments)
     plot_draw_distribution(experiments)
     plot_outcome_distribution(experiments)
+    plot_calibration_curve(experiments)
     print(f"\nAll plots saved to ./{PLOTS_DIR}/")
 
 
