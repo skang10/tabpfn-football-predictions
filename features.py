@@ -213,7 +213,8 @@ def load_data(refresh=False):
     else:
         df = pd.read_csv(DATA)
     df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").reset_index(drop=True)
+    df["_source_order"] = np.arange(len(df))
+    df = df.sort_values(["date", "_source_order"], kind="mergesort").reset_index(drop=True)
     df["neutral"] = df["neutral"].astype(str).str.upper().eq("TRUE").astype(int)
     df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce")
     df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce")
