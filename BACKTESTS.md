@@ -37,6 +37,55 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 
 ---
 
+## Feature ablation (exp_0628/ablation, TabPFN only)
+
+Branch: `exp_0628/ablation` · Parent: `exp_0628/wc_context_features` · commit ee66915
+
+Cumulative feature sets (each row adds to the previous), then targeted removals from `all_current`.
+
+| ablation set | n features | BT1 ll | BT2 ll | BT3 ll | BT1 acc | BT2 acc | BT3 acc |
+|--------------|:----------:|:------:|:------:|:------:|:-------:|:-------:|:-------:|
+| elo_only | 1 | 1.1648 | **0.8562** | 0.9347 | 47.9% | 56.2% | <u>62.5%</u> |
+| elo_features | 3 | 1.1561 | 0.9555 | 0.9369 | <u>50.0%</u> | 56.2% | <u>62.5%</u> |
+| elo_form | 7 | 1.1543 | 0.9475 | 0.9410 | <u>50.0%</u> | 56.2% | <u>62.5%</u> |
+| elo_form_rest | 9 | 1.1550 | 0.9383 | 0.9410 | 47.9% | 56.2% | <u>62.5%</u> |
+| elo_form_homeaway | 20 | 1.1346 | 0.9321 | 0.9302 | <u>50.0%</u> | 56.2% | 58.3% |
+| all_current | 26 | 1.1314 | 0.9520 | **0.9136** | 47.9% | 56.2% | <u>62.5%</u> |
+| no_h2h | 22 | 1.1366 | 0.9495 | 0.9342 | 47.9% | 56.2% | 58.3% |
+| no_streak | 24 | 1.1331 | 0.9530 | 0.9197 | 47.9% | 56.2% | 60.4% |
+| wc_context | 30 | **1.1273** | 0.9414 | 0.9248 | 47.9% | 56.2% | 58.3% |
+
+### Ablation findings
+
+**BT2 (WC knockout — most important for competition):**
+- `elo_only` is the single best model on BT2 (0.8562), beating every feature-rich variant
+- Adding form/rest brings modest recovery; H2H + ctx (→ all_current) then *hurts* back to 0.9520
+- `no_h2h` (0.9495) beats `all_current` (0.9520) — H2H features are net negative on KO stage
+- WC context features (→ wc_context 0.9414) partially recover but still far from elo_only
+
+**BT3 (WC26 group stage — most recent data):**
+- `all_current` (26 features) is best (0.9136) — neither more nor fewer features helps
+- Removing H2H hurts (+0.021): H2H signal is informative for group stage
+- Removing streak hurts (+0.006): mild contribution
+- Adding WC context hurts (+0.011): context features add noise on recent data
+
+**BT1 (WC22 group stage):**
+- More features consistently helps; wc_context best (1.1273)
+- All models remain above uniform (1.0986) — group stage is the hardest BT
+
+**Signal vs noise summary:**
+| feature group | BT2 effect | BT3 effect | verdict |
+|---------------|-----------|-----------|---------|
+| Elo diff only | baseline best | weak | strong for KO |
+| + form | neutral | neutral | modest |
+| + rest | ↑ (helps) | neutral | marginal |
+| + home/away stats | ↑ (helps) | ↑ (helps) | useful |
+| + H2H | ↓ (hurts) | ↑ (helps) | mixed |
+| + WC context | ↓ (hurts) | ↓ (hurts) | hurts on recent data |
+| + streak | ↓ (hurts) | ↑ (helps) | mixed |
+
+---
+
 ## Superseded (old schema — different test set, accuracy-primary)
 
 > WC 2026 group stage only, accuracy as primary metric. Historical reference only.
