@@ -6,7 +6,7 @@ from collections import defaultdict
 
 TODAY = pd.Timestamp.now().normalize()
 TRAIN_START = pd.Timestamp("2014-01-01")
-MAX_TRAIN = 10000
+MAX_TRAIN = 3000
 HOME_ADV = 65.0
 DATA       = "results.csv"
 GOALS_DATA = "goalscorers.csv"
