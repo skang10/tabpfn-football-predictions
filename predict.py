@@ -9,6 +9,7 @@ Run as a script to generate forward predictions for upcoming fixtures:
 """
 import argparse
 import os
+import subprocess
 from datetime import datetime
 
 import numpy as np
@@ -40,6 +41,15 @@ def predict_proba(model, X):
     })
 
 
+def _git_branch():
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+        return branch.replace("/", "_")
+    except Exception:
+        return "unknown"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true", help="Re-download dataset")
@@ -59,7 +69,7 @@ def main():
         return
 
     today_str = datetime.now().strftime("%Y%m%d")
-    filename  = f"predictions/submission_{today_str}.csv"
+    filename  = f"predictions/submission_{_git_branch()}_{today_str}.csv"
     os.makedirs("predictions", exist_ok=True)
 
     model     = train(played.tail(MAX_TRAIN))
