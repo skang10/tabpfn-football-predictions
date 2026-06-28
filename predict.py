@@ -68,9 +68,11 @@ def main():
 
     out = future[["date", "home_team", "away_team"]].copy()
     out["predicted"]  = label_arr[proba_df[["p_home_win", "p_draw", "p_away_win"]].values.argmax(1)]
-    out["p_home_win"] = proba_df["p_home_win"].round(3).values
-    out["p_draw"]     = proba_df["p_draw"].round(3).values
-    out["p_away_win"] = proba_df["p_away_win"].round(3).values
+    _ph = proba_df["p_home_win"].round(3)
+    _pd = proba_df["p_draw"].round(3)
+    out["p_home_win"] = _ph.values
+    out["p_draw"]     = _pd.values
+    out["p_away_win"] = (1.0 - _ph - _pd).round(3).values
 
     out.to_csv(filename, index=False)
     print(f"\n{len(out)} fixture predictions -> {filename}\n")

@@ -131,11 +131,15 @@ def evaluate(label, test, model):
     print(f"  mean p(draw)          {mean_p_draw:.3f}")
     print(f"  true outcome avg prob {true_outcome_avg_prob:.3f}")
 
+    _ph = proba_df["p_home_win"].round(3)
+    _pd = proba_df["p_draw"].round(3)
+    _pa = (1.0 - _ph - _pd).round(3)
+
     pm = test[["date", "home_team", "away_team", "outcome"]].copy()
     pm["predicted"]  = pred
-    pm["p_home_win"] = proba_df["p_home_win"].round(3).values
-    pm["p_draw"]     = proba_df["p_draw"].round(3).values
-    pm["p_away_win"] = proba_df["p_away_win"].round(3).values
+    pm["p_home_win"] = _ph.values
+    pm["p_draw"]     = _pd.values
+    pm["p_away_win"] = _pa.values
     pm["p_true"]     = true_probs.round(3)
     pm["correct"]    = pm["outcome"] == pm["predicted"]
 
