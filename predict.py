@@ -188,6 +188,8 @@ def main():
     parser.add_argument("--draw-scale", type=float, default=1.0,
                         help="Multiply p_draw by this factor then renormalize (default 1.0). "
                              "Use 1.2 for knockout-stage submissions.")
+    parser.add_argument("--output-dir", default="predictions",
+                        help="Directory for generated submission CSVs (default: predictions).")
     args = parser.parse_args()
 
     from_date = pd.Timestamp(args.date) if args.date else TODAY
@@ -195,7 +197,8 @@ def main():
     df    = load_data(refresh=args.refresh)
     feats = build_features(df)
     played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
-    future = feats[feats["home_score"].isna() & (feats["date"] >= from_date)].sort_values("date")
+    # Keep the fixture order from results.csv/load_data instead of re-sorting here.
+    future = feats[feats["home_score"].isna() & (feats["date"] >= from_date)]
 
     if not len(future):
         print("No upcoming fixtures — run with --refresh to fetch latest data.")
@@ -203,8 +206,8 @@ def main():
 
     today_str  = datetime.now().strftime("%Y%m%d")
     scale_tag  = f"_ds{args.draw_scale:.1f}".replace(".", "") if args.draw_scale != 1.0 else ""
-    filename   = f"predictions/submission_{_git_branch()}{scale_tag}_{today_str}.csv"
-    os.makedirs("predictions", exist_ok=True)
+    filename   = os.path.join(args.output_dir, f"submission_{_git_branch()}{scale_tag}_{today_str}.csv")
+    os.makedirs(args.output_dir, exist_ok=True)
 
     model     = train(played.tail(MAX_TRAIN))
     proba_df  = predict_proba(model, future[FEATURES].values)
