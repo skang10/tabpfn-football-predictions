@@ -44,7 +44,7 @@ LLM_DIFF_FEATURES = [
     "tactical_edge_diff",
 ]
 
-FEATURES = BASE_FEATURES + LLM_DIFF_FEATURES
+FEATURES = BASE_FEATURES
 
 
 def _empty_llm_features(index):
@@ -114,9 +114,12 @@ def _read_llm_context(path=LLM_CONTEXT_PATH):
     return ctx[keep].drop_duplicates(["_llm_date", "home_team", "away_team"], keep="last")
 
 
-def build_features(df):
+def build_features(df, llm_context=False, llm_context_path=LLM_CONTEXT_PATH):
     feats = _base_build_features(df)
-    ctx = _read_llm_context()
+    if not llm_context:
+        return feats
+
+    ctx = _read_llm_context(llm_context_path)
     if ctx is None or ctx.empty:
         return feats.join(_empty_llm_features(feats.index))
 
@@ -131,9 +134,14 @@ def build_features(df):
     return merged
 
 
-def train(pool):
+def _model_features(use_llm_context=False):
+    return BASE_FEATURES + LLM_DIFF_FEATURES if use_llm_context else BASE_FEATURES
+
+
+def train(pool, features=None):
+    features = features or FEATURES
     clf = TabPFNClassifier(ignore_pretraining_limits=True, random_state=42)
-    clf.fit(pool[FEATURES].values, pool["outcome"].values)
+    clf.fit(pool[features].values, pool["outcome"].values)
     return clf
 
 
@@ -190,12 +198,17 @@ def main():
                              "Use 1.2 for knockout-stage submissions.")
     parser.add_argument("--output-dir", default="predictions",
                         help="Directory for generated submission CSVs (default: predictions).")
+    parser.add_argument("--llm-context", action="store_true",
+                        help="Enable cached LLM context features from llm_context.csv/jsonl.")
+    parser.add_argument("--llm-context-path", default=LLM_CONTEXT_PATH,
+                        help=f"Path to cached LLM context file (default: {LLM_CONTEXT_PATH}).")
     args = parser.parse_args()
 
     from_date = pd.Timestamp(args.date) if args.date else TODAY
 
     df    = load_data(refresh=args.refresh)
-    feats = build_features(df)
+    feats = build_features(df, llm_context=args.llm_context, llm_context_path=args.llm_context_path)
+    model_features = _model_features(args.llm_context)
     played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
     # Keep the fixture order from results.csv/load_data instead of re-sorting here.
     future = feats[feats["home_score"].isna() & (feats["date"] >= from_date)]
@@ -205,12 +218,13 @@ def main():
         return
 
     today_str  = datetime.now().strftime("%Y%m%d")
+    llm_tag    = "_llm" if args.llm_context else ""
     scale_tag  = f"_ds{args.draw_scale:.1f}".replace(".", "") if args.draw_scale != 1.0 else ""
-    filename   = os.path.join(args.output_dir, f"submission_{_git_branch()}{scale_tag}_{today_str}.csv")
+    filename   = os.path.join(args.output_dir, f"submission_{_git_branch()}{llm_tag}{scale_tag}_{today_str}.csv")
     os.makedirs(args.output_dir, exist_ok=True)
 
-    model     = train(played.tail(MAX_TRAIN))
-    proba_df  = predict_proba(model, future[FEATURES].values)
+    model     = train(played.tail(MAX_TRAIN), features=model_features)
+    proba_df  = predict_proba(model, future[model_features].values)
 
     # Apply draw scaling then renormalize
     hda = proba_df[["p_home_win", "p_draw", "p_away_win"]].values.copy()

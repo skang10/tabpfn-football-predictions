@@ -48,6 +48,14 @@ uv run python scripts/generate_llm_context.py generate --from-date 2026-06-28 --
 uv run python scripts/generate_llm_context.py validate llm_context.jsonl
 ```
 
+## Predict with LLM context
+
+```bash
+uv run predict.py --draw-scale 1.2 --llm-context --output-dir submissions
+```
+
+Without `--llm-context`, `predict.py` uses only the baseline feature set.
+
 ## Reproducibility rules
 
 - Commit the prompt, schema, source notes, generated context, and audit log used
