@@ -36,7 +36,7 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | tw_s2018_m10000 | exp_0628/train_window | exp_0628/lightweight_20feat | 1.1458 | 0.9191 | **0.9290** | <u>50.0%</u> | 56.2% | 58.3% | bf8d22c | 20 features + TRAIN_START=2018 + MAX_TRAIN=10000; best BT3 so far |
 | draw_3class | exp_0628/draw_handling | main | 1.1606 | 0.9062 | 0.9433 | <u>50.0%</u> | 56.2% | 64.6% | b6aa62d | tabpfn_3class raw, no draw multiplier |
 | draw_2stage | exp_0628/draw_handling | main | 1.1749 | 0.9102 | 0.9282 | <u>50.0%</u> | 56.2% | — | b6aa62d | two-stage: binary draw/not-draw then home/away |
-| draw_3class_k12 ★ | exp_0628/draw_handling | main | — | **0.9020** | — | — | — | — | b6aa62d | tabpfn_3class + draw_k=1.2 (alpha/eps are no-ops for KO) · submit with `--draw-scale 1.2` |
+| draw_3class_k12 ★ | main (via PR #2) | exp_0628/draw_handling | 1.1706 | **0.9020** | 0.9378 | 47.9% | 56.2% | 58.3% | c8483bc | tabpfn_3class + draw_k=1.2 · submit with `--draw-scale 1.2` · BT1 hurt (+0.010), BT2 best, BT3 improved (-0.005) |
 
 ### Key observations
 
