@@ -1,6 +1,7 @@
 results.csv
 goalscorers.csv
 predictions/
+submissions/
 predictions_*.csv
 experiments.jsonl
 plots/
