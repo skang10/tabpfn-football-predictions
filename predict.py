@@ -75,7 +75,7 @@ def main():
     out["p_draw"]     = pd_raw.round(2)
     out["p_away_win"] = (1.0 - ph_raw - pd_raw).round(2)
 
-    out.to_csv(filename, index=False)
+    out.to_csv(filename, index=False, float_format="%.2f")
     print(f"\n{len(out)} fixture predictions -> {filename}\n")
     for r, pred in zip(out.itertuples(), predicted):
         print(f"  {r.date.date()}  {r.home_team:>22} vs {r.away_team:<22}"
