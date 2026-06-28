@@ -1,24 +1,35 @@
-"""Step 9: Dedicated draw handling — compare three model tracks on BT1/BT2/BT3.
+"""Step 9: Dedicated draw handling — draw multiplier, ensemble, diagnostics.
 
-Tracks:
-  tabpfn_3class   current production (reference, 3-class TabPFN)
-  tabpfn_2stage   stage1: draw/not_draw → stage2: home_win/away_win | not_draw
-  poisson         Poisson GLM on goals → sum score probabilities → 1X2
-  dixon_coles     Poisson + Dixon-Coles τ correction for low-score cells
+Three phases (run in one pass — models are trained once, predictions cached):
 
-Two-stage combination:
-  p_draw     = q_draw                               (stage 1)
-  p_home_win = (1 - q_draw) * q_home_given_not_draw (stage 1 × stage 2)
-  p_away_win = (1 - q_draw) * (1 - q_home_given_not_draw)
+  Phase 1 — base models
+    tabpfn_3class   3-class TabPFN (reference)
+    tabpfn_2stage   stage1: draw/not_draw  stage2: home/away | not_draw
+    poisson         PoissonGLM on goals → sum score probs → 1X2
+    dixon_coles     Poisson + τ correction for low-score cells (MLE ρ)
+
+  Phase 2 — draw multiplier sweep (applied to cached predictions)
+    p_draw *= k  then renormalize;  k ∈ {0.9, 1.0, 1.1, 1.2, 1.3, 1.4}
+
+  Phase 3 — ensemble (weighted average of cached predictions)
+    2-model: tabpfn_2stage+dc, tabpfn_2stage+poisson, tabpfn_3class+poisson
+    3-model: tabpfn_2stage+poisson+dc
+    weights: 0.25/0.5/0.75 grid
+
+  Diagnostics reported for each model:
+    mean p_draw on actual draws / non-draws
+    draw log-loss / non-draw log-loss
+    draw probability rank distribution (1st / 2nd / 3rd most likely)
 
 Usage:
-    uv run draw_models.py [--refresh] [--log] [--only tabpfn_2stage poisson]
+    uv run draw_models.py [--refresh] [--log]
+    uv run draw_models.py --only tabpfn_2stage poisson   # skip heavy TabPFN runs
 """
 import argparse
+import itertools
 import json
 import os
 import subprocess
-from collections import defaultdict
 from datetime import datetime
 
 import numpy as np
@@ -41,233 +52,277 @@ EXPERIMENTS_LOG = "experiments.jsonl"
 TODAY_STR       = datetime.now().strftime("%Y%m%d")
 WC2022_START    = pd.Timestamp("2022-11-20")
 WC2026_START    = pd.Timestamp("2026-06-11")
-MAX_GOALS       = 8   # truncation for Poisson sum
+MAX_GOALS       = 8
+MULTIPLIERS     = [0.9, 1.0, 1.1, 1.2, 1.3, 1.4]
 
 
-# ── Shared helpers ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Metrics and diagnostics
+# ══════════════════════════════════════════════════════════════════════════════
 
-def _ll(proba_hda: np.ndarray, outcomes) -> float:
-    lex = proba_hda[:, [2, 1, 0]]
+def _ll(hda: np.ndarray, outcomes) -> float:
+    lex = hda[:, [2, 1, 0]]
     return log_loss(outcomes, lex, labels=["away_win", "draw", "home_win"])
 
 
-def _acc(proba_hda: np.ndarray, outcomes) -> float:
+def _acc(hda: np.ndarray, outcomes) -> float:
     label_arr = np.array(["home_win", "draw", "away_win"])
-    pred = label_arr[proba_hda.argmax(1)]
-    return (pred == np.array(outcomes)).mean()
+    return (label_arr[hda.argmax(1)] == np.array(outcomes)).mean()
 
 
-def _draw_recall(proba_hda: np.ndarray, outcomes) -> float:
-    label_arr = np.array(["home_win", "draw", "away_win"])
-    pred = label_arr[proba_hda.argmax(1)]
-    actual = np.array(outcomes)
-    draws_actual = (actual == "draw").sum()
-    if draws_actual == 0:
-        return float("nan")
-    return ((pred == "draw") & (actual == "draw")).sum() / draws_actual
+def _draw_diagnostics(hda: np.ndarray, outcomes) -> dict:
+    """Draw-specific signal quality metrics."""
+    actual      = np.array(outcomes)
+    p_draw      = hda[:, 1]
+    is_draw     = actual == "draw"
+    is_not_draw = ~is_draw
+
+    draw_ll     = (-np.log(p_draw[is_draw].clip(1e-9))).mean()     if is_draw.any()     else float("nan")
+    non_draw_ll = (-np.log((1 - p_draw)[is_not_draw].clip(1e-9))).mean() if is_not_draw.any() else float("nan")
+
+    # rank of p_draw among [p_home, p_draw, p_away] for actual draws
+    ranks = (hda[is_draw] >= p_draw[is_draw, None]).sum(axis=1)  # 1=highest, 3=lowest
+    rank_counts = {r: int((ranks == r).sum()) for r in [1, 2, 3]}
+
+    return {
+        "n_draws":          int(is_draw.sum()),
+        "n_total":          len(actual),
+        "mean_p_draw_draw": float(p_draw[is_draw].mean())     if is_draw.any()     else float("nan"),
+        "mean_p_draw_ndraw":float(p_draw[is_not_draw].mean()) if is_not_draw.any() else float("nan"),
+        "draw_ll":          float(draw_ll),
+        "non_draw_ll":      float(non_draw_ll),
+        "rank1": rank_counts[1],  # draw is most likely  → correctly confident
+        "rank2": rank_counts[2],  # draw is 2nd          → some signal
+        "rank3": rank_counts[3],  # draw is least likely → no signal
+    }
 
 
-def _pool(feats, cutoff):
-    played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
-    return played[played["date"] < cutoff].tail(MAX_TRAIN)
+def _apply_multiplier(hda: np.ndarray, k: float) -> np.ndarray:
+    out = hda.copy()
+    out[:, 1] *= k
+    return out / out.sum(axis=1, keepdims=True)
 
 
-def _evaluate(name, proba_hda, outcomes):
-    ll  = _ll(proba_hda, outcomes)
-    acc = _acc(proba_hda, outcomes)
-    dr  = _draw_recall(proba_hda, outcomes)
-    return {"name": name, "ll": ll, "acc": acc, "draw_recall": dr, "n": len(outcomes)}
+# ══════════════════════════════════════════════════════════════════════════════
+# Base model trainers
+# ══════════════════════════════════════════════════════════════════════════════
 
-
-# ── Track 1: 3-class TabPFN ────────────────────────────────────────────────────
-
-def _tabpfn_3class(pool, test):
+def _tabpfn_3class(pool, test) -> np.ndarray:
     clf = TabPFNClassifier(ignore_pretraining_limits=True, random_state=42)
     clf.fit(pool[FEATURES].values, pool["outcome"].values)
-    proba = clf.predict_proba(pool[FEATURES].values[:1])   # warm-up (no-op)
-    proba = clf.predict_proba(test[FEATURES].values)
-    proba = proba / proba.sum(axis=1, keepdims=True)
+    proba   = clf.predict_proba(test[FEATURES].values)
+    proba  /= proba.sum(axis=1, keepdims=True)
     classes = list(clf.classes_)
-    hda = np.column_stack([
+    return np.column_stack([
         proba[:, classes.index("home_win")],
         proba[:, classes.index("draw")],
         proba[:, classes.index("away_win")],
     ])
-    return hda
 
 
-# ── Track 2: Two-stage TabPFN ──────────────────────────────────────────────────
-
-def _tabpfn_2stage(pool, test):
+def _tabpfn_2stage(pool, test) -> np.ndarray:
     X_pool = pool[FEATURES].values
     y_pool = pool["outcome"].values
 
-    # Stage 1: draw vs not_draw
     y1 = (y_pool == "draw").astype(int)
     clf1 = TabPFNClassifier(ignore_pretraining_limits=True, random_state=42)
     clf1.fit(X_pool, y1)
-    p1 = clf1.predict_proba(test[FEATURES].values)
-    classes1 = list(clf1.classes_)
-    q_draw = p1[:, classes1.index(1)]
+    p1      = clf1.predict_proba(test[FEATURES].values)
+    q_draw  = p1[:, list(clf1.classes_).index(1)]
 
-    # Stage 2: home_win vs away_win (trained only on non-draw matches)
     mask_nd = y_pool != "draw"
-    X_nd = X_pool[mask_nd]
-    y_nd = (y_pool[mask_nd] == "home_win").astype(int)
     clf2 = TabPFNClassifier(ignore_pretraining_limits=True, random_state=42)
-    clf2.fit(X_nd, y_nd)
-    p2 = clf2.predict_proba(test[FEATURES].values)
-    classes2 = list(clf2.classes_)
-    q_home_given_nd = p2[:, classes2.index(1)]
+    clf2.fit(X_pool[mask_nd], (y_pool[mask_nd] == "home_win").astype(int))
+    p2              = clf2.predict_proba(test[FEATURES].values)
+    q_home_given_nd = p2[:, list(clf2.classes_).index(1)]
 
-    p_draw     = q_draw
-    p_home_win = (1 - q_draw) * q_home_given_nd
-    p_away_win = (1 - q_draw) * (1 - q_home_given_nd)
-
-    hda = np.column_stack([p_home_win, p_draw, p_away_win])
-    hda = hda / hda.sum(axis=1, keepdims=True)
-    return hda
+    hda = np.column_stack([
+        (1 - q_draw) * q_home_given_nd,
+        q_draw,
+        (1 - q_draw) * (1 - q_home_given_nd),
+    ])
+    return hda / hda.sum(axis=1, keepdims=True)
 
 
-# ── Track 3a: Poisson GLM ──────────────────────────────────────────────────────
-
-_GOAL_FEATS_HOME = [
-    "home_gf5", "home_ga5", "away_ga5", "away_gf5",
-    "elo_diff", "home_elo", "home_form5", "home_rest",
-]
-_GOAL_FEATS_AWAY = [
-    "away_gf5", "away_ga5", "home_ga5", "home_gf5",
-    "elo_diff", "away_elo", "away_form5", "away_rest",
-]
+_GOAL_FEATS_HOME = ["home_gf5", "home_ga5", "away_ga5", "away_gf5",
+                    "elo_diff", "home_elo", "home_form5", "home_rest"]
+_GOAL_FEATS_AWAY = ["away_gf5", "away_ga5", "home_ga5", "home_gf5",
+                    "elo_diff", "away_elo", "away_form5", "away_rest"]
 
 
-def _poisson_probs(lam_h, lam_a, max_g=MAX_GOALS):
-    """Vectorised: lam_h, lam_a are 1-D arrays of length n."""
-    k = np.arange(max_g + 1)
-    # P[i,j] = P(home=i) * P(away=j)  per match
-    p_h = poisson.pmf(k[None, :, None], lam_h[:, None, None])   # (n, k, 1)
-    p_a = poisson.pmf(k[None, None, :], lam_a[:, None, None])   # (n, 1, k)
-    joint = p_h * p_a                                             # (n, k, k)
-    p_home_win = joint[:, np.tril_indices(max_g + 1, -1)[0],
-                         np.tril_indices(max_g + 1, -1)[1]].sum(1)
-    p_away_win = joint[:, np.triu_indices(max_g + 1, 1)[0],
-                         np.triu_indices(max_g + 1, 1)[1]].sum(1)
-    p_draw     = np.array([joint[i].diagonal().sum() for i in range(len(lam_h))])
-    hda = np.column_stack([p_home_win, p_draw, p_away_win])
+def _poisson_probs(lam_h: np.ndarray, lam_a: np.ndarray) -> np.ndarray:
+    k    = np.arange(MAX_GOALS + 1)
+    p_hw = np.zeros(len(lam_h))
+    p_d  = np.zeros(len(lam_h))
+    p_aw = np.zeros(len(lam_h))
+    for i in range(MAX_GOALS + 1):
+        for j in range(MAX_GOALS + 1):
+            p = poisson.pmf(i, lam_h) * poisson.pmf(j, lam_a)
+            if i > j:   p_hw += p
+            elif i == j: p_d  += p
+            else:        p_aw += p
+    hda = np.column_stack([p_hw, p_d, p_aw])
     return hda / hda.sum(axis=1, keepdims=True)
 
 
 def _train_poisson(pool):
-    glm_h = make_pipeline(StandardScaler(),
-                          PoissonRegressor(alpha=0.1, max_iter=300))
-    glm_a = make_pipeline(StandardScaler(),
-                          PoissonRegressor(alpha=0.1, max_iter=300))
+    glm_h = make_pipeline(StandardScaler(), PoissonRegressor(alpha=0.1, max_iter=300))
+    glm_a = make_pipeline(StandardScaler(), PoissonRegressor(alpha=0.1, max_iter=300))
     glm_h.fit(pool[_GOAL_FEATS_HOME].values, pool["home_score"].values)
     glm_a.fit(pool[_GOAL_FEATS_AWAY].values, pool["away_score"].values)
     return glm_h, glm_a
 
 
-def _poisson_predict(glm_h, glm_a, test):
+def _poisson(pool, test) -> np.ndarray:
+    glm_h, glm_a = _train_poisson(pool)
     lam_h = glm_h.predict(test[_GOAL_FEATS_HOME].values).clip(0.2, 8)
     lam_a = glm_a.predict(test[_GOAL_FEATS_AWAY].values).clip(0.2, 8)
     return _poisson_probs(lam_h, lam_a)
 
 
-# ── Track 3b: Dixon-Coles ──────────────────────────────────────────────────────
-
 def _dc_tau(x, y, lam_h, lam_a, rho):
-    """Dixon-Coles τ correction for low-score cells (vectorised over matches)."""
     tau = np.ones(len(lam_h))
-    mask_00 = (x == 0) & (y == 0)
-    mask_10 = (x == 1) & (y == 0)
-    mask_01 = (x == 0) & (y == 1)
-    mask_11 = (x == 1) & (y == 1)
-    tau[mask_00] = 1 - lam_h[mask_00] * lam_a[mask_00] * rho
-    tau[mask_10] = 1 + lam_a[mask_10] * rho
-    tau[mask_01] = 1 + lam_h[mask_01] * rho
-    tau[mask_11] = 1 - rho
+    tau[(x == 0) & (y == 0)] -= lam_h[(x == 0) & (y == 0)] * lam_a[(x == 0) & (y == 0)] * rho
+    tau[(x == 1) & (y == 0)] += lam_a[(x == 1) & (y == 0)] * rho
+    tau[(x == 0) & (y == 1)] += lam_h[(x == 0) & (y == 1)] * rho
+    tau[(x == 1) & (y == 1)] -= rho
     return tau.clip(1e-6)
 
 
-def _dc_log_likelihood(rho, pool, glm_h, glm_a):
+def _dc_nll(rho, pool, glm_h, glm_a):
     lam_h = glm_h.predict(pool[_GOAL_FEATS_HOME].values).clip(0.2, 8)
     lam_a = glm_a.predict(pool[_GOAL_FEATS_AWAY].values).clip(0.2, 8)
-    hs = pool["home_score"].values.astype(int)
-    as_ = pool["away_score"].values.astype(int)
+    hs, as_ = pool["home_score"].values.astype(int), pool["away_score"].values.astype(int)
     ll = (np.log(poisson.pmf(hs, lam_h).clip(1e-9))
           + np.log(poisson.pmf(as_, lam_a).clip(1e-9))
           + np.log(_dc_tau(hs, as_, lam_h, lam_a, rho)))
     return -ll.sum()
 
 
-def _dc_probs(lam_h, lam_a, rho, max_g=MAX_GOALS):
-    k = np.arange(max_g + 1)
-    p_home_win = np.zeros(len(lam_h))
-    p_draw     = np.zeros(len(lam_h))
-    p_away_win = np.zeros(len(lam_h))
-    for i in k:
-        for j in k:
-            ph = poisson.pmf(i, lam_h) * poisson.pmf(j, lam_a)
-            ph *= _dc_tau(
-                np.full(len(lam_h), i), np.full(len(lam_h), j),
-                lam_h, lam_a, rho,
-            )
-            if i > j:
-                p_home_win += ph
-            elif i == j:
-                p_draw += ph
-            else:
-                p_away_win += ph
-    hda = np.column_stack([p_home_win, p_draw, p_away_win])
+def _dixon_coles(pool, test) -> np.ndarray:
+    glm_h, glm_a = _train_poisson(pool)
+    rho  = minimize_scalar(_dc_nll, bounds=(-0.2, 0.2), method="bounded",
+                           args=(pool, glm_h, glm_a)).x
+    lam_h = glm_h.predict(test[_GOAL_FEATS_HOME].values).clip(0.2, 8)
+    lam_a = glm_a.predict(test[_GOAL_FEATS_AWAY].values).clip(0.2, 8)
+    p_hw = np.zeros(len(lam_h))
+    p_d  = np.zeros(len(lam_h))
+    p_aw = np.zeros(len(lam_h))
+    for i in range(MAX_GOALS + 1):
+        for j in range(MAX_GOALS + 1):
+            ph = (poisson.pmf(i, lam_h) * poisson.pmf(j, lam_a)
+                  * _dc_tau(np.full(len(lam_h), i), np.full(len(lam_h), j), lam_h, lam_a, rho))
+            if i > j:    p_hw += ph
+            elif i == j: p_d  += ph
+            else:        p_aw += ph
+    hda = np.column_stack([p_hw, p_d, p_aw])
     return hda / hda.sum(axis=1, keepdims=True)
 
 
-def _dixon_coles_predict(pool, test):
-    glm_h, glm_a = _train_poisson(pool)
-    res = minimize_scalar(
-        _dc_log_likelihood, bounds=(-0.2, 0.2), method="bounded",
-        args=(pool, glm_h, glm_a),
-    )
-    rho = res.x
-    lam_h = glm_h.predict(test[_GOAL_FEATS_HOME].values).clip(0.2, 8)
-    lam_a = glm_a.predict(test[_GOAL_FEATS_AWAY].values).clip(0.2, 8)
-    return _dc_probs(lam_h, lam_a, rho), rho
+BASE_MODELS = {
+    "tabpfn_3class": _tabpfn_3class,
+    "tabpfn_2stage": _tabpfn_2stage,
+    "poisson":       _poisson,
+    "dixon_coles":   _dixon_coles,
+}
+
+ENSEMBLES = [
+    ("tabpfn_2stage", "dixon_coles"),
+    ("tabpfn_2stage", "poisson"),
+    ("tabpfn_3class", "poisson"),
+    ("tabpfn_2stage", "poisson", "dixon_coles"),
+]
 
 
-# ── Backtest runner ────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Output helpers
+# ══════════════════════════════════════════════════════════════════════════════
 
-def _run_bt(label, pool, test, tracks):
-    outcomes = test["outcome"].tolist()
-    results = {}
-    for name, fn in tracks.items():
-        try:
-            hda = fn(pool, test)
-            results[name] = _evaluate(name, hda, outcomes)
-        except Exception as e:
-            print(f"  [{name}] ERROR: {e}")
-            results[name] = None
+def _sep(n=72): print("─" * n)
+
+
+def _print_base_table(bt_label, cached, outcomes):
+    print(f"\n{'━'*72}")
+    print(f"  {bt_label}")
+    print(f"{'━'*72}")
+    hdr = f"  {'model':<22} {'ll':>8} {'acc':>7}  {'p_draw|draw':>11} {'p_draw|ndraw':>12} {'rank 1/2/3':>12}"
+    print(hdr)
+    _sep()
+    for name, hda in cached.items():
+        ll  = _ll(hda, outcomes)
+        acc = _acc(hda, outcomes)
+        d   = _draw_diagnostics(hda, outcomes)
+        r   = f"{d['rank1']}/{d['rank2']}/{d['rank3']}"
+        pd_draw  = f"{d['mean_p_draw_draw']:.3f}"  if not np.isnan(d['mean_p_draw_draw'])  else "—"
+        pd_ndraw = f"{d['mean_p_draw_ndraw']:.3f}" if not np.isnan(d['mean_p_draw_ndraw']) else "—"
+        print(f"  {name:<22} {ll:>8.4f} {acc:>7.1%}  {pd_draw:>11} {pd_ndraw:>12} {r:>12}")
+    diag = _draw_diagnostics(list(cached.values())[0], outcomes)
+    print(f"  actual draws: {diag['n_draws']}/{diag['n_total']}")
+
+
+def _print_multiplier_table(bt_label, cached, outcomes):
+    print(f"\n── Draw multiplier sweep — {bt_label}")
+    names = list(cached)
+    hdr   = f"  {'k':>4}" + "".join(f"  {n:>16}" for n in names)
+    print(hdr)
+    _sep(len(hdr))
+    best = {n: (float("inf"), 1.0) for n in names}
+    for k in MULTIPLIERS:
+        row = f"  {k:>4.1f}"
+        for name, hda in cached.items():
+            ll = _ll(_apply_multiplier(hda, k), outcomes)
+            row += f"  {ll:>16.4f}"
+            if ll < best[name][0]:
+                best[name] = (ll, k)
+        print(row)
+    print("  best k: " + "  ".join(f"{n}=k{best[n][1]}" for n in names))
+    return best
+
+
+def _print_ensemble_table(bt_label, cached, outcomes):
+    print(f"\n── Ensemble — {bt_label}")
+    hdr = f"  {'combination':<40} {'weights':>18}  {'ll':>8}"
+    print(hdr)
+    _sep(len(hdr))
+    results = []
+    for combo in ENSEMBLES:
+        if not all(m in cached for m in combo):
+            continue
+        n = len(combo)
+        # generate weight grids summing to 1
+        if n == 2:
+            weight_sets = [(w, round(1 - w, 2)) for w in [0.25, 0.5, 0.75]]
+        else:
+            weight_sets = [
+                ws for ws in itertools.product([0.25, 0.5, 0.75], repeat=n)
+                if abs(sum(ws) - 1.0) < 1e-9
+            ]
+        for ws in weight_sets:
+            blend = sum(w * cached[m] for w, m in zip(ws, combo))
+            blend /= blend.sum(axis=1, keepdims=True)
+            ll = _ll(blend, outcomes)
+            label = "+".join(m.replace("tabpfn_", "t_").replace("dixon_coles", "dc") for m in combo)
+            w_str = "+".join(f"{w:.2f}" for w in ws)
+            results.append((ll, label, w_str, blend))
+            print(f"  {label:<40} {w_str:>18}  {ll:>8.4f}")
+    if results:
+        best = min(results, key=lambda x: x[0])
+        print(f"  → best: {best[1]} @ {best[2]}  ll={best[0]:.4f}")
     return results
 
 
-def _print_table(bt_label, results_by_track):
-    print(f"\n── {bt_label} ──")
-    fmt = f"  {'model':<22}  {'log-loss':>9}  {'accuracy':>9}  {'draw recall':>12}"
-    print(fmt)
-    print("  " + "-" * (len(fmt) - 2))
-    for name, r in results_by_track.items():
-        if r is None:
-            print(f"  {name:<22}  {'ERROR':>9}")
-            continue
-        dr = f"{r['draw_recall']:.1%}" if not np.isnan(r["draw_recall"]) else "—"
-        print(f"  {name:<22}  {r['ll']:>9.4f}  {r['acc']:>9.1%}  {dr:>12}")
+# ══════════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════════
 
+def _pool(feats, cutoff):
+    played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
+    return played[played["date"] < cutoff].tail(MAX_TRAIN)
 
-# ── Logging ────────────────────────────────────────────────────────────────────
 
 def git_commit():
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
     except Exception:
         return "unknown"
 
@@ -287,75 +342,65 @@ def _upsert(run_name, entry):
             f.write(json.dumps(e) + "\n")
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--log",     action="store_true")
     parser.add_argument("--only",    nargs="+",
-                        choices=["tabpfn_3class", "tabpfn_2stage", "poisson", "dixon_coles"],
-                        help="Run only these tracks")
+                        choices=list(BASE_MODELS),
+                        help="Run only these base models (skip others)")
     args = parser.parse_args()
 
     df    = load_data(refresh=args.refresh)
     feats = build_features(df)
 
-    # BT fixtures
-    wc22      = wc_matches(feats, 2022)
-    wc26      = wc_matches(feats, 2026)
-    bt1_test  = wc_group_stage(wc22)
-    bt2_test  = wc_knockout(wc22)
-    bt3_test  = wc_group_rounds(wc26, max_round=2)
-
-    pool_bt12 = _pool(feats, WC2022_START)
-    pool_bt3  = _pool(feats, WC2026_START)
-
-    # Track registry
-    all_tracks = {
-        "tabpfn_3class": lambda pool, test: _tabpfn_3class(pool, test),
-        "tabpfn_2stage": lambda pool, test: _tabpfn_2stage(pool, test),
-        "poisson":       lambda pool, test: _poisson_predict(*_train_poisson(pool), test),
-        "dixon_coles":   lambda pool, test: _dixon_coles_predict(pool, test)[0],
-    }
-    if args.only:
-        all_tracks = {k: v for k, v in all_tracks.items() if k in args.only}
-
-    print(f"\nTracks: {list(all_tracks)}")
-    print(f"Training pool: BT1/BT2={len(pool_bt12)}  BT3={len(pool_bt3)}")
-
-    bt_configs = [
-        ("BT1 — WC 2022 group (48)", pool_bt12, bt1_test),
-        ("BT2 — WC 2022 knockout (16)", pool_bt12, bt2_test),
-        ("BT3 — WC 2026 R1-2 (48)", pool_bt3,  bt3_test),
+    wc22     = wc_matches(feats, 2022)
+    wc26     = wc_matches(feats, 2026)
+    bt_cfgs  = [
+        ("BT1 — WC2022 group (48)",    _pool(feats, WC2022_START), wc_group_stage(wc22)),
+        ("BT2 — WC2022 knockout (16)", _pool(feats, WC2022_START), wc_knockout(wc22)),
+        ("BT3 — WC2026 R1-2 (48)",     _pool(feats, WC2026_START), wc_group_rounds(wc26, 2)),
     ]
 
-    all_results = {}
-    for bt_label, pool, test in bt_configs:
-        r = _run_bt(bt_label, pool, test, all_tracks)
-        all_results[bt_label] = r
-        _print_table(bt_label, r)
+    active_models = {k: v for k, v in BASE_MODELS.items()
+                     if args.only is None or k in args.only}
+
+    print(f"\nModels  : {list(active_models)}")
+    print(f"Pool    : BT1/BT2={len(bt_cfgs[0][1])}  BT3={len(bt_cfgs[2][1])}")
+
+    for bt_label, pool, test in bt_cfgs:
+        outcomes = test["outcome"].tolist()
+
+        # ── Phase 1: train and cache all base predictions ──────────────────
+        cached = {}
+        for name, fn in active_models.items():
+            try:
+                cached[name] = fn(pool, test)
+            except Exception as e:
+                print(f"  [{name}] ERROR: {e}")
+
+        if not cached:
+            continue
+
+        # ── Phase 2: base model table + diagnostics ────────────────────────
+        _print_base_table(bt_label, cached, outcomes)
+
+        # ── Phase 3: draw multiplier sweep ─────────────────────────────────
+        _print_multiplier_table(bt_label, cached, outcomes)
+
+        # ── Phase 4: ensemble ──────────────────────────────────────────────
+        _print_ensemble_table(bt_label, cached, outcomes)
 
     if args.log:
-        for name in all_tracks:
-            run_name = f"draw_{name}_{TODAY_STR}"
-            entry = {
-                "run":       run_name,
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "commit":    git_commit(),
-                "features":  FEATURES,
-            }
-            for bt_label, r in all_results.items():
-                bt_key = bt_label.split()[0].lower()
-                if r.get(name):
-                    entry[f"{bt_key}_ll"]  = round(r[name]["ll"],  4)
-                    entry[f"{bt_key}_acc"] = round(r[name]["acc"], 4)
-                    entry[f"{bt_key}_draw_recall"] = (
-                        round(r[name]["draw_recall"], 4)
-                        if not np.isnan(r[name]["draw_recall"]) else None
-                    )
-            _upsert(run_name, entry)
-            print(f"\n  logged '{run_name}'")
+        entry = {
+            "run":       f"draw_models_{TODAY_STR}",
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "commit":    git_commit(),
+            "features":  FEATURES,
+            "note":      "draw multiplier + ensemble sweep; see stdout for full table",
+        }
+        _upsert(entry["run"], entry)
+        print(f"\nLogged '{entry['run']}'")
 
 
 if __name__ == "__main__":
