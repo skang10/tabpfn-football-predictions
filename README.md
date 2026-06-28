@@ -55,5 +55,5 @@ uv sync
 Generate the submitted predictions:
 
 ```bash
-uv run predict.py --draw-scale 1.2 --output-dir submissions
+uv run predict.py --draw-scale 1.2 --date 2026-06-28 --output-dir submissions
 ```
