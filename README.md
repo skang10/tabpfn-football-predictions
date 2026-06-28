@@ -31,10 +31,6 @@ Required local data files:
 - `results.csv`: historical international results and upcoming fixtures
 - `goalscorers.csv`: used to correct extra-time-inflated knockout scores back to
   90-minute scores
-- `llm_context.csv`: cached LLM-extracted context, required for the
-  `--llm-context` run
-- `llm_sources/*.md`, `prompts/`, `schemas/`, `llm_context_audit.jsonl`:
-  reproducibility artifacts for the LLM context extraction
 
 The base match data comes from the `martj42/international_results` dataset.
 
@@ -48,16 +44,6 @@ Base TabPFN features:
 - Recent team stats: win rate, goals for/against, goal difference
 - Streak and experience: `home_streak`, `away_streak`, `home_played`, `away_played`
 
-Optional LLM context features, enabled only with `--llm-context`:
-
-- `absence_diff`
-- `lineup_uncertainty_diff`
-- `rotation_risk_diff`
-- `tactical_edge_diff`
-
-The LLM does not predict probabilities. It only extracts structured team news
-from cached source notes.
-
 ## Reproduce Submission
 
 Install dependencies:
@@ -66,21 +52,8 @@ Install dependencies:
 uv sync
 ```
 
-Generate the current LLM-context submission:
-
-```bash
-uv run predict.py --draw-scale 1.2 --llm-context --output-dir submissions
-```
-
-Generate the base non-LLM submission:
+Generate the submitted predictions:
 
 ```bash
 uv run predict.py --draw-scale 1.2 --output-dir submissions
-```
-
-Regenerate LLM context from saved source notes:
-
-```bash
-uv run python scripts/generate_llm_context.py generate --from-date 2026-06-28
-uv run python scripts/generate_llm_context.py validate llm_context.jsonl
 ```
