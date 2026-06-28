@@ -3,7 +3,7 @@
 **Primary metric: multi-class log-loss (lower is better)** — competition scoring metric per §8.
 Uniform baseline (random guessing): log-loss = 1.099.
 
-Three fixed test sets evaluated with `uv run backtest.py` on each branch:
+Three fixed test sets evaluated with `uv run backtest.py`:
 
 | ID | Test set | Matches | Training pool cutoff |
 |----|----------|---------|----------------------|
@@ -11,37 +11,35 @@ Three fixed test sets evaluated with `uv run backtest.py` on each branch:
 | BT2 | WC 2022 knockout | 16 | 2022-11-20 |
 | BT3 | WC 2026 group stage rounds 1–2 | 48 | 2026-06-11 |
 
-**Bold** = best log-loss in column &nbsp;·&nbsp; <u>Underline</u> = best accuracy in column.
+**Bold** = best log-loss in column &nbsp;·&nbsp; <u>Underline</u> = best accuracy in column
 
 ---
 
-## BT1 — WC 2022 Group Stage (48 matches)
+## Experiment log
 
-| experiment | log-loss | accuracy | commit | date | notes |
-|------------|:--------:|:--------:|--------|------|-------|
-| baseline | **1.1258** | <u>50.0%</u> | 3d45aeb | 2026-06-27 | TabPFN 3-class, TRAIN_START=2014, 26 features |
+| run | branch | parent | BT1 ll | BT2 ll | BT3 ll | BT1 acc | BT2 acc | BT3 acc | commit | notes |
+|-----|--------|--------|:------:|:------:|:------:|:-------:|:-------:|:-------:|--------|-------|
+| uniform | main | — | **1.0986** | 1.0986 | 1.0986 | 37.5% | <u>62.5%</u> | 52.1% | 3262c25 | [1/3, 1/3, 1/3] every match |
+| always_home | main | — | 2.8858 | 1.7396 | 2.2172 | 37.5% | <u>62.5%</u> | 52.1% | 3262c25 | [0.98, 0.01, 0.01] every match |
+| elo_logistic | main | — | 1.1515 | **0.8724** | 0.9123 | 47.9% | 56.2% | <u>62.5%</u> | 3262c25 | multinomial LR on elo_diff only |
+| lr_all_features | main | — | 1.1217 | 0.9326 | **0.9000** | 47.9% | 56.2% | 58.3% | 3262c25 | multinomial LR + StandardScaler, 26 features |
+| tabpfn_all_features | main | — | 1.1337 | 0.9456 | 0.9121 | 47.9% | 56.2% | <u>62.5%</u> | 3262c25 | TabPFN, 26 features |
+| baseline | main | — | 1.1258 | 0.9405 | 0.9163 | <u>50.0%</u> | 56.2% | <u>62.5%</u> | 39550fa | TabPFN, original 26 features, logged via backtest.py |
+| wc_context_features | exp_0628/wc_context_features | main | 1.1241 | 0.9321 | 0.9259 | 47.9% | 56.2% | 58.3% | 4222893 | +abs_elo_diff, host_adv_diff, concacaf_adv_diff, same_continent_adv_diff → 30 features |
+| symmetric_features | exp_0628/symmetric_features | exp_0628/wc_context_features | 1.1280 | 0.9530 | 0.9290 | 47.9% | 56.2% | 58.3% | ec65f5f | replaced 8 home/away individual features with 4 diffs → 26 features; regressed vs wc_context |
 
----
+### Key observations
 
-## BT2 — WC 2022 Knockout (16 matches)
-
-| experiment | log-loss | accuracy | commit | date | notes |
-|------------|:--------:|:--------:|--------|------|-------|
-| baseline | **0.9405** | <u>56.2%</u> | 3d45aeb | 2026-06-27 | TabPFN 3-class, TRAIN_START=2014, 26 features |
-
----
-
-## BT3 — WC 2026 Group Stage Rounds 1–2 (48 matches)
-
-| experiment | log-loss | accuracy | commit | date | notes |
-|------------|:--------:|:--------:|--------|------|-------|
-| baseline | **0.9163** | <u>62.5%</u> | 3d45aeb | 2026-06-27 | TabPFN 3-class, TRAIN_START=2014, 26 features |
+- **BT1 (WC22 group)**: no model beats uniform on log-loss — the group stage is near-unpredictable; wc_context_features is the best non-trivial model here
+- **BT2 (WC22 KO)**: elo_logistic dominates; wc_context_features second best among feature-rich models
+- **BT3 (WC26 R1-2)**: lr_all_features leads; WC context features hurt slightly vs baseline (model is confused by context features when test data is very recent)
+- **Draw recall = 0%** across all runs — systematic issue, not model-specific
 
 ---
 
-## Superseded (old schema — WC 2026 group stage, accuracy-primary)
+## Superseded (old schema — different test set, accuracy-primary)
 
-> Different test set, accuracy as primary metric. Historical reference only.
+> WC 2026 group stage only, accuracy as primary metric. Historical reference only.
 
 | run | accuracy | log-loss | n | commit | date | notes |
 |-----|:--------:|:--------:|:-:|--------|------|-------|
