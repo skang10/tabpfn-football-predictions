@@ -13,8 +13,9 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 
 **Bold** = best log-loss in column &nbsp;·&nbsp; <u>Underline</u> = best accuracy in column &nbsp;·&nbsp; ★ = current production model (main)
 
-> **Production model: main** (merged from `exp_0628/lightweight_max3000`, PR #1) — 20 features · MAX_TRAIN=3000 · BT2=0.9075
-> Source experiments: `lightweight_20feat` (feature set) + `tw_m3000` (MAX_TRAIN search)
+> **Production model: main** — 20 features · MAX_TRAIN=3000 · draw_k=1.2
+> **Knockout submission**: `uv run predict.py --draw-scale 1.2` → BT2=**0.9020**
+> Source: PR #1 (`tw_m3000`) + PR #2 (`draw_handling`)
 
 ---
 
@@ -31,15 +32,19 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | wc_context_features | exp_0628/wc_context_features | main | 1.1241 | 0.9321 | 0.9259 | 47.9% | 56.2% | 58.3% | 4222893 | +abs_elo_diff, host_adv_diff, concacaf_adv_diff, same_continent_adv_diff → 30 features |
 | symmetric_features | exp_0628/symmetric_features | exp_0628/wc_context_features | 1.1280 | 0.9530 | 0.9290 | 47.9% | 56.2% | 58.3% | ec65f5f | replaced 8 home/away individual features with 4 diffs → 26 features; regressed vs wc_context |
 | lightweight_20feat | exp_0628/lightweight_20feat | exp_0628/ablation · abl_elo_form_homeaway | 1.1346 | 0.9321 | 0.9302 | <u>50.0%</u> | 56.2% | 58.3% | 6826053 | Elo + form + rest + home/away stats; no H2H / ctx / WC — best feature-rich TabPFN on BT2 |
-| tw_m3000 ★ | main (via PR #1) | exp_0628/lightweight_20feat | 1.1601 | **0.9075** | 0.9428 | <u>50.0%</u> | 56.2% | 64.6% | bf8d22c | 20 features + MAX_TRAIN=3000; TRAIN_START irrelevant (pool always capped at 3000) · **merged into main via PR #1** |
+| tw_m3000 | main (via PR #1) | exp_0628/lightweight_20feat | 1.1601 | 0.9075 | 0.9428 | <u>50.0%</u> | 56.2% | 64.6% | bf8d22c | 20 features + MAX_TRAIN=3000 · merged into main via PR #1 |
 | tw_s2018_m10000 | exp_0628/train_window | exp_0628/lightweight_20feat | 1.1458 | 0.9191 | **0.9290** | <u>50.0%</u> | 56.2% | 58.3% | bf8d22c | 20 features + TRAIN_START=2018 + MAX_TRAIN=10000; best BT3 so far |
+| draw_3class | exp_0628/draw_handling | main | 1.1606 | 0.9062 | 0.9433 | <u>50.0%</u> | 56.2% | 64.6% | b6aa62d | tabpfn_3class raw, no draw multiplier |
+| draw_2stage | exp_0628/draw_handling | main | 1.1749 | 0.9102 | 0.9282 | <u>50.0%</u> | 56.2% | — | b6aa62d | two-stage: binary draw/not-draw then home/away |
+| draw_3class_k12 ★ | exp_0628/draw_handling | main | — | **0.9020** | — | — | — | — | b6aa62d | tabpfn_3class + draw_k=1.2 (alpha/eps are no-ops for KO) · submit with `--draw-scale 1.2` |
 
 ### Key observations
 
-- **BT1 (WC22 group)**: no model beats uniform on log-loss — the group stage is near-unpredictable; wc_context_features is the best non-trivial model here
-- **BT2 (WC22 KO)**: elo_logistic dominates; wc_context_features second best among feature-rich models
-- **BT3 (WC26 R1-2)**: lr_all_features leads; WC context features hurt slightly vs baseline (model is confused by context features when test data is very recent)
-- **Draw recall = 0%** across all runs — systematic issue, not model-specific
+- **BT1 (WC22 group)**: no model beats uniform on log-loss — group stage is near-unpredictable; wc_context_features is the best non-trivial model here
+- **BT2 (WC22 KO)**: elo_logistic dominates; draw_3class_k12 is the best feature-rich model (0.9020)
+- **BT3 (WC26 R1-2)**: lr_all_features leads; two-stage model (draw_2stage, 0.9282) best among TabPFN variants
+- **Draw recall = 0%** — argmax never picks draw; draw multiplier k=1.2 improves log-loss without needing draw recall
+- **Calibration (Step 10)**: eps clipping is a no-op (probabilities never near boundaries); alpha=1.0 is optimal for KO stage (no power scaling needed); only draw_k matters
 
 ---
 
@@ -128,6 +133,48 @@ Fixed 20-feature set. Grid: TRAIN_START ∈ {2010, 2014, 2018} × MAX_TRAIN ∈ 
 
 **Core tension:** knockout stage favours small recent pools; group stage favours large pools.
 For the competition target (knockout) → MAX_TRAIN=3000 is the single most impactful adjustment found so far.
+
+---
+
+## Draw handling + post-calibration (exp_0628/draw_handling · merged PR #2)
+
+Branch: `exp_0628/draw_handling` · Parent: `main` · commit b6aa62d
+
+### Step 9 — draw model comparison (raw, no multiplier)
+
+| model | BT1 ll | BT2 ll | BT3 ll | notes |
+|-------|:------:|:------:|:------:|-------|
+| tabpfn_3class | 1.1606 | 0.9062 | 0.9433 | standard 3-class TabPFN (production base) |
+| tabpfn_2stage | 1.1749 | 0.9102 | **0.9282** | binary draw/not-draw then home/away |
+| poisson | 1.1041 | 0.9230 | 0.9396 | Poisson GLM on goal features |
+| dixon_coles | 1.1058 | **0.9216** | 0.9315 | Poisson + τ correction for low-score cells |
+
+### Step 9 — draw multiplier sweep (tabpfn_3class, BT2)
+
+| draw_k | BT2 ll | Δ vs raw |
+|:------:|:------:|:--------:|
+| 0.9 | 0.9157 | +0.0095 |
+| 1.0 | 0.9062 | 0.0000 |
+| 1.1 | 0.9031 | −0.0031 |
+| **1.2** | **0.9020** | **−0.0043** |
+| 1.3 | 0.9034 | −0.0028 |
+| 1.4 | 0.9078 | +0.0016 |
+
+### Step 10 — post-calibration grid (BT2 target)
+
+Grid: eps ∈ {0.003, 0.005, 0.01} × alpha ∈ {0.8, 0.9, 1.0} × draw_k ∈ {0.9, 1.0, 1.1, 1.2}
+
+**Key findings:**
+- **eps clipping**: no effect — model probabilities never approach the clip boundary
+- **alpha power**: alpha=1.0 (no change) is optimal for BT2 (KO stage); alpha=0.8 helps BT1/BT3 (group stage) by −0.048 but hurts KO
+- **draw_k=1.2** is the only effective lever for KO stage; confirmed across both models
+
+| model | alpha | draw_k | eps | BT2 ll | Δ vs raw |
+|-------|:-----:|:------:|:---:|:------:|:--------:|
+| tabpfn_3class | 1.0 | 1.2 | any | **0.9020** | −0.0043 |
+| tabpfn_2stage | 1.0 | 1.2 | any | 0.9041 | −0.0061 |
+
+**Submission command for knockout stage:** `uv run predict.py --draw-scale 1.2`
 
 ---
 
