@@ -59,26 +59,27 @@ def main():
         return
 
     today_str = datetime.now().strftime("%Y%m%d")
-    filename  = f"predictions/baseline_{today_str}.csv"
+    filename  = f"predictions/submission_{today_str}.csv"
     os.makedirs("predictions", exist_ok=True)
 
     model     = train(played.tail(MAX_TRAIN))
     proba_df  = predict_proba(model, future[FEATURES].values)
     label_arr = np.array(["home_win", "draw", "away_win"])
+    predicted = label_arr[proba_df[["p_home_win", "p_draw", "p_away_win"]].values.argmax(1)]
 
+    # Submission format: date, home_team, away_team, p_home_win, p_draw, p_away_win (2 dp, sums to 1)
+    ph_raw = proba_df["p_home_win"].values
+    pd_raw = proba_df["p_draw"].values
     out = future[["date", "home_team", "away_team"]].copy()
-    out["predicted"]  = label_arr[proba_df[["p_home_win", "p_draw", "p_away_win"]].values.argmax(1)]
-    _ph = proba_df["p_home_win"].round(3)
-    _pd = proba_df["p_draw"].round(3)
-    out["p_home_win"] = _ph.values
-    out["p_draw"]     = _pd.values
-    out["p_away_win"] = (1.0 - _ph - _pd).round(3).values
+    out["p_home_win"] = ph_raw.round(2)
+    out["p_draw"]     = pd_raw.round(2)
+    out["p_away_win"] = (1.0 - ph_raw - pd_raw).round(2)
 
     out.to_csv(filename, index=False)
     print(f"\n{len(out)} fixture predictions -> {filename}\n")
-    for r in out.itertuples():
-        print(f"  {r.date.date()}  {r.home_team:>20} vs {r.away_team:<20}  "
-              f"-> {r.predicted:<9}  H {r.p_home_win:4.0%} | D {r.p_draw:4.0%} | A {r.p_away_win:4.0%}")
+    for r, pred in zip(out.itertuples(), predicted):
+        print(f"  {r.date.date()}  {r.home_team:>22} vs {r.away_team:<22}"
+              f"  -> {pred:<9}  H {r.p_home_win:.0%} | D {r.p_draw:.0%} | A {r.p_away_win:.0%}")
 
 
 if __name__ == "__main__":
