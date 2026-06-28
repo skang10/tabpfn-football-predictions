@@ -52,9 +52,12 @@ def _git_branch():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--refresh", action="store_true", help="Re-download dataset")
-    parser.add_argument("--date", default=None,
+    parser.add_argument("--refresh",    action="store_true", help="Re-download dataset")
+    parser.add_argument("--date",       default=None,
                         help="Predict fixtures on or after this date (YYYY-MM-DD). Defaults to today.")
+    parser.add_argument("--draw-scale", type=float, default=1.0,
+                        help="Multiply p_draw by this factor then renormalize (default 1.0). "
+                             "Use 1.2 for knockout-stage submissions.")
     args = parser.parse_args()
 
     from_date = pd.Timestamp(args.date) if args.date else TODAY
@@ -68,22 +71,29 @@ def main():
         print("No upcoming fixtures — run with --refresh to fetch latest data.")
         return
 
-    today_str = datetime.now().strftime("%Y%m%d")
-    filename  = f"predictions/submission_{_git_branch()}_{today_str}.csv"
+    today_str  = datetime.now().strftime("%Y%m%d")
+    scale_tag  = f"_ds{args.draw_scale:.1f}".replace(".", "") if args.draw_scale != 1.0 else ""
+    filename   = f"predictions/submission_{_git_branch()}{scale_tag}_{today_str}.csv"
     os.makedirs("predictions", exist_ok=True)
 
     model     = train(played.tail(MAX_TRAIN))
     proba_df  = predict_proba(model, future[FEATURES].values)
+
+    # Apply draw scaling then renormalize
+    hda = proba_df[["p_home_win", "p_draw", "p_away_win"]].values.copy()
+    if args.draw_scale != 1.0:
+        hda[:, 1] *= args.draw_scale
+        hda /= hda.sum(axis=1, keepdims=True)
+
     label_arr = np.array(["home_win", "draw", "away_win"])
-    predicted = label_arr[proba_df[["p_home_win", "p_draw", "p_away_win"]].values.argmax(1)]
+    predicted = label_arr[hda.argmax(1)]
 
     # Submission format: date, home_team, away_team, p_home_win, p_draw, p_away_win (2 dp, sums to 1)
-    ph_raw = proba_df["p_home_win"].values
-    pd_raw = proba_df["p_draw"].values
+    ph_raw, pd_raw, pa_raw = hda[:, 0], hda[:, 1], hda[:, 2]
     out = future[["date", "home_team", "away_team"]].copy()
     out["p_home_win"] = ph_raw.round(2)
     out["p_draw"]     = pd_raw.round(2)
-    out["p_away_win"] = (1.0 - ph_raw - pd_raw).round(2)
+    out["p_away_win"] = pa_raw.round(2)
 
     out.to_csv(filename, index=False, float_format="%.2f")
     print(f"\n{len(out)} fixture predictions -> {filename}\n")
