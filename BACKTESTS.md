@@ -110,21 +110,21 @@ Fixed 20-feature set. Grid: TRAIN_START ∈ {2010, 2014, 2018} × MAX_TRAIN ∈ 
 
 ### Training window findings
 
-**TRAIN_START 没有独立效果 — MAX_TRAIN 才是决定性变量：**
-- s2010_m3000、s2014_m3000、s2018_m3000 结果完全相同（n22 都被 MAX_TRAIN=3000 截断）
-- TRAIN_START 只在可用数据量 < MAX_TRAIN 时才产生作用（如 s2018_m10000：pre-WC2022 仅 4403 场）
+**TRAIN_START has no independent effect — MAX_TRAIN is the decisive variable:**
+- s2010_m3000, s2014_m3000, s2018_m3000 produce identical results (pool always capped at 3000)
+- TRAIN_START only matters when available data < MAX_TRAIN (e.g. s2018_m10000: only 4403 matches pre-WC2022)
 
-**BT2（淘汰赛）：MAX_TRAIN=3000 最优（0.9075）**
-- 比 MAX_TRAIN=10000（0.9321）好 0.025 — 差距显著
-- 解释：最近 3000 场 ≈ 2019–2022，更能反映当前球队状态；数据越多越稀释近期信号
-- s2018_m5000/10000（0.9191）介于两者之间，印证了"近期数据"的价值
+**BT2 (knockout): MAX_TRAIN=3000 is best (0.9075)**
+- 0.025 improvement over MAX_TRAIN=10000 (0.9321) — a large gap
+- The most recent 3000 matches ≈ 2019–2022, better reflecting current team strength; larger pools dilute the recency signal
+- s2018_m5000/10000 (0.9191) sits in between, confirming the value of recency
 
-**BT3（小组赛）：MAX_TRAIN=10000 最优（s2018_m10000 = 0.9290）**
-- MAX_TRAIN=3000 最差（0.9428）；更多数据对小组赛始终有帮助
-- s2018_m10000（0.9290）略好于 s2014_m10000（0.9302）
+**BT3 (group stage): MAX_TRAIN=10000 is best (s2018_m10000 = 0.9290)**
+- MAX_TRAIN=3000 is worst (0.9428); more data consistently helps for group stage
+- s2018_m10000 (0.9290) slightly edges s2014_m10000 (0.9302)
 
-**核心张力：** 淘汰赛偏好小数据集（近期精炼），小组赛偏好大数据集（更多样本）。
-对于比赛目标（淘汰赛）→ MAX_TRAIN=3000 是关键调整。
+**Core tension:** knockout stage favours small recent pools; group stage favours large pools.
+For the competition target (knockout) → MAX_TRAIN=3000 is the single most impactful adjustment found so far.
 
 ---
 
