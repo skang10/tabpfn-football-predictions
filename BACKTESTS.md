@@ -11,7 +11,10 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | BT2 | WC 2022 knockout | 16 | 2022-11-20 |
 | BT3 | WC 2026 group stage rounds 1–2 | 48 | 2026-06-11 |
 
-**Bold** = best log-loss in column &nbsp;·&nbsp; <u>Underline</u> = best accuracy in column
+**Bold** = best log-loss in column &nbsp;·&nbsp; <u>Underline</u> = best accuracy in column &nbsp;·&nbsp; ★ = current production model (PR #1)
+
+> **Production model: `exp_0628/lightweight_max3000`** — 20 features · MAX_TRAIN=3000 · BT2=0.9075
+> Source experiments: `lightweight_20feat` (feature set) + `tw_m3000` (MAX_TRAIN search) · PR #1 pending merge to main
 
 ---
 
@@ -28,7 +31,7 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | wc_context_features | exp_0628/wc_context_features | main | 1.1241 | 0.9321 | 0.9259 | 47.9% | 56.2% | 58.3% | 4222893 | +abs_elo_diff, host_adv_diff, concacaf_adv_diff, same_continent_adv_diff → 30 features |
 | symmetric_features | exp_0628/symmetric_features | exp_0628/wc_context_features | 1.1280 | 0.9530 | 0.9290 | 47.9% | 56.2% | 58.3% | ec65f5f | replaced 8 home/away individual features with 4 diffs → 26 features; regressed vs wc_context |
 | lightweight_20feat | exp_0628/lightweight_20feat | exp_0628/ablation · abl_elo_form_homeaway | 1.1346 | 0.9321 | 0.9302 | <u>50.0%</u> | 56.2% | 58.3% | 6826053 | Elo + form + rest + home/away stats; no H2H / ctx / WC — best feature-rich TabPFN on BT2 |
-| tw_m3000 | exp_0628/train_window | exp_0628/lightweight_20feat | 1.1601 | **0.9075** | 0.9428 | <u>50.0%</u> | 56.2% | 64.6% | bf8d22c | 20 features + MAX_TRAIN=3000; TRAIN_START irrelevant (pool always capped at 3000) |
+| tw_m3000 ★ | exp_0628/train_window | exp_0628/lightweight_20feat | 1.1601 | **0.9075** | 0.9428 | <u>50.0%</u> | 56.2% | 64.6% | bf8d22c | 20 features + MAX_TRAIN=3000; TRAIN_START irrelevant (pool always capped at 3000) · **baked into lightweight_max3000 (PR #1)** |
 | tw_s2018_m10000 | exp_0628/train_window | exp_0628/lightweight_20feat | 1.1458 | 0.9191 | **0.9290** | <u>50.0%</u> | 56.2% | 58.3% | bf8d22c | 20 features + TRAIN_START=2018 + MAX_TRAIN=10000; best BT3 so far |
 
 ### Key observations
