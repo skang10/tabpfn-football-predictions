@@ -46,6 +46,19 @@ LLM_DIFF_FEATURES = [
 
 FEATURES = BASE_FEATURES
 
+# Conditional draw scaling: evenly-matched teams (small |elo_diff|) draw far more
+# often than mismatches, so boost p_draw more when the game is close and taper to
+# ~1x for blowouts, instead of the flat draw_k=1.2 applied to every match.
+#     draw_k(match) = 1 + DRAW_B * exp(-|elo_diff| / DRAW_S)
+# Tuned on BT2 (WC22 knockout); see sweep_cond_draw.py. Set DRAW_B=0 to disable.
+DRAW_B = 0.4
+DRAW_S = 150.0
+_ELO_DIFF_IDX = BASE_FEATURES.index("elo_diff")
+
+
+def _conditional_draw_k(elo_diff, b=DRAW_B, s=DRAW_S):
+    return 1.0 + b * np.exp(-np.abs(np.asarray(elo_diff, dtype=float)) / s)
+
 
 def _empty_llm_features(index):
     cols = LLM_DIFF_FEATURES + ["llm_confidence"]
@@ -146,14 +159,29 @@ def train(pool, features=None):
 
 
 def predict_proba(model, X):
-    """Return a DataFrame with columns p_home_win, p_draw, p_away_win (rows sum to 1)."""
+    """Return a DataFrame with columns p_home_win, p_draw, p_away_win (rows sum to 1).
+
+    Applies conditional draw scaling (larger draw boost for evenly-matched games)
+    using elo_diff, which is column `_ELO_DIFF_IDX` of X. DRAW_B=0 disables it.
+    """
     proba = model.predict_proba(X)
     proba = proba / proba.sum(axis=1, keepdims=True)
     classes = list(model.classes_)
+    hda = np.column_stack([
+        proba[:, classes.index("home_win")],
+        proba[:, classes.index("draw")],
+        proba[:, classes.index("away_win")],
+    ])
+
+    if DRAW_B:
+        elo_diff = np.asarray(X)[:, _ELO_DIFF_IDX]
+        hda[:, 1] *= _conditional_draw_k(elo_diff)
+        hda /= hda.sum(axis=1, keepdims=True)
+
     return pd.DataFrame({
-        "p_home_win": proba[:, classes.index("home_win")],
-        "p_draw":     proba[:, classes.index("draw")],
-        "p_away_win": proba[:, classes.index("away_win")],
+        "p_home_win": hda[:, 0],
+        "p_draw":     hda[:, 1],
+        "p_away_win": hda[:, 2],
     })
 
 
