@@ -44,7 +44,12 @@ LLM_DIFF_FEATURES = [
     "tactical_edge_diff",
 ]
 
-FEATURES = BASE_FEATURES
+# Recency / in-tournament-condition features (last 3-10 games). Long-term Elo
+# misses the physical & mental condition a team carries *into* the WC, which the
+# last few results capture. Added on top of the 20-feature base; the trio wins
+# BT2 and BT3 together (see sweep_recent_form.py) though each alone is noise.
+RECENCY_FEATURES = ["form3_diff", "ewform_diff", "momentum_diff"]
+FEATURES = BASE_FEATURES + RECENCY_FEATURES
 
 # Conditional draw scaling: evenly-matched teams (small |elo_diff|) draw far more
 # often than mismatches, so boost p_draw more when the game is close and taper to
@@ -148,7 +153,7 @@ def build_features(df, llm_context=False, llm_context_path=LLM_CONTEXT_PATH):
 
 
 def _model_features(use_llm_context=False):
-    return BASE_FEATURES + LLM_DIFF_FEATURES if use_llm_context else BASE_FEATURES
+    return FEATURES + LLM_DIFF_FEATURES if use_llm_context else FEATURES
 
 
 def train(pool, features=None):
