@@ -232,8 +232,9 @@ def main():
     parser.add_argument("--date",       default=None,
                         help="Predict fixtures on or after this date (YYYY-MM-DD). Defaults to today.")
     parser.add_argument("--draw-scale", type=float, default=1.0,
-                        help="Multiply p_draw by this factor then renormalize (default 1.0). "
-                             "Use 1.2 for knockout-stage submissions.")
+                        help="Extra flat multiplier on p_draw, then renormalize (default 1.0 = "
+                             "none). Conditional draw scaling is already baked into predict_proba; "
+                             "this stacks on top and is normally left at 1.0.")
     parser.add_argument("--output-dir", default="predictions",
                         help="Directory for generated submission CSVs (default: predictions).")
     parser.add_argument("--llm-context", action="store_true",
