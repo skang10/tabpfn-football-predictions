@@ -157,25 +157,30 @@ def predict_proba(model, X):
     })
 
 
-def _round_probs_2dp(probs):
-    """Round H/D/A probabilities to 2 decimals while preserving a 1.00 row sum."""
+def _round_probs(probs, decimals=4):
+    """Round H/D/A probabilities to `decimals` places while preserving a 1.0 row sum.
+
+    Uses the largest-remainder method so rounded rows still sum to exactly 1, and
+    guarantees each outcome stays strictly between 0 and 1 (competition requirement).
+    """
+    scale = 10 ** decimals
     rounded = []
     for row in probs:
-        cents = np.floor(row * 100).astype(int)
-        remainder = int(100 - cents.sum())
-        fractions = row * 100 - cents
+        units = np.floor(row * scale).astype(int)
+        remainder = int(scale - units.sum())
+        fractions = row * scale - units
         for idx in np.argsort(-fractions)[:remainder]:
-            cents[idx] += 1
+            units[idx] += 1
 
-        zero_idx = np.where(cents == 0)[0]
+        zero_idx = np.where(units == 0)[0]
         for idx in zero_idx:
-            donor = int(np.argmax(cents))
-            if cents[donor] <= 1:
+            donor = int(np.argmax(units))
+            if units[donor] <= 1:
                 break
-            cents[idx] = 1
-            cents[donor] -= 1
+            units[idx] = 1
+            units[donor] -= 1
 
-        rounded.append(cents / 100)
+        rounded.append(units / scale)
     return np.array(rounded)
 
 
@@ -202,6 +207,9 @@ def main():
                         help="Enable cached LLM context features from llm_context.csv/jsonl.")
     parser.add_argument("--llm-context-path", default=LLM_CONTEXT_PATH,
                         help=f"Path to cached LLM context file (default: {LLM_CONTEXT_PATH}).")
+    parser.add_argument("--decimals", type=int, default=4,
+                        help="Decimal places for submitted probabilities (default 4). "
+                             "Rows still sum to exactly 1 and stay strictly between 0 and 1.")
     args = parser.parse_args()
 
     from_date = pd.Timestamp(args.date) if args.date else TODAY
@@ -235,15 +243,15 @@ def main():
     label_arr = np.array(["home_win", "draw", "away_win"])
     predicted = label_arr[hda.argmax(1)]
 
-    # Submission format: date, home_team, away_team, p_home_win, p_draw, p_away_win (2 dp, sums to 1)
-    rounded_hda = _round_probs_2dp(hda)
+    # Submission format: date, home_team, away_team, p_home_win, p_draw, p_away_win (sums to 1)
+    rounded_hda = _round_probs(hda, decimals=args.decimals)
     ph_raw, pd_raw, pa_raw = rounded_hda[:, 0], rounded_hda[:, 1], rounded_hda[:, 2]
     out = future[["date", "home_team", "away_team"]].copy()
     out["p_home_win"] = ph_raw
     out["p_draw"]     = pd_raw
     out["p_away_win"] = pa_raw
 
-    out.to_csv(filename, index=False, float_format="%.2f")
+    out.to_csv(filename, index=False, float_format=f"%.{args.decimals}f")
     print(f"\n{len(out)} fixture predictions -> {filename}\n")
     for r, pred in zip(out.itertuples(), predicted):
         print(f"  {r.date.date()}  {r.home_team:>22} vs {r.away_team:<22}"
