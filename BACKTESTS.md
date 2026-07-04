@@ -38,6 +38,10 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | llm_context_features | exp/llm_context_features | main | 1.1606 | 0.9062 | 0.9433 | <u>50.0%</u> | 56.2% | 64.6% | 2bf6f95 | +4 cached LLM diff features from `llm_context.csv/jsonl`; no cache present → all zero, matches raw 3-class |
 | draw_2stage | exp_0628/draw_handling | main | 1.1749 | 0.9102 | 0.9282 | <u>50.0%</u> | 56.2% | — | b6aa62d | two-stage: binary draw/not-draw then home/away |
 | draw_3class_k12 ★ | main (via PR #2) | exp_0628/draw_handling | 1.1706 | **0.9020** | 0.9378 | 47.9% | 56.2% | 58.3% | c8483bc | tabpfn_3class + draw_k=1.2 · submit with `--draw-scale 1.2` · BT1 hurt (+0.010), BT2 best, BT3 improved (-0.005) |
+| cond_draw_elo † | exp/cond_draw_elo | main | 1.1683 | 0.9012 | 0.9512 | 52.1% | 56.2% | 58.3% | 72cfd54 | draw_k = 1 + 0.4·exp(−\|elo_diff\|/150) folded into `predict_proba` · larger draw boost for close games · sweep in `sweep_cond_draw.py` |
+| wc_recent_form † | exp/wc_recent_form | exp/cond_draw_elo | 1.1722 | 0.8950 | 0.9489 | 47.9% | 56.2% | 58.3% | 37dd25b | +form3_diff, ewform_diff, momentum_diff → 23 features on top of cond_draw_elo · in-tournament condition/momentum · trio improves BT2 **and** BT3 together, each feature alone is noise · ablation in `sweep_recent_form.py` |
+
+† Computed on the **refreshed dataset** (latest game 2026-07-06), not the 2026-06-28 snapshot used by every row above — cross-row log-loss is *not* directly comparable; the two † rows *are* comparable to each other (same data). Same-data comparison (from `sweep_cond_draw.py`): cond_draw_elo **beats flat draw_k=1.2 on BT2 (0.9012 vs 0.9052) and BT1 (1.1683 vs 1.1711)** but **regresses BT3 (0.9512 vs 0.9395)**; BT2-optimal (b=0.8, s=100) reaches 0.9003 but overfits 16 KO matches and wrecks BT3 (0.9576), so balanced b=0.4 is baked in. wc_recent_form builds on cond_draw_elo and improves both BT2 (0.9012→0.8950) and BT3 (0.9512→0.9489).
 
 ### Key observations
 
@@ -45,6 +49,8 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 - **BT2 (WC22 KO)**: elo_logistic dominates; draw_3class_k12 is the best feature-rich model (0.9020)
 - **BT3 (WC26 R1-2)**: lr_all_features leads; two-stage model (draw_2stage, 0.9282) best among TabPFN variants
 - **Draw recall = 0%** — argmax never picks draw; draw multiplier k=1.2 improves log-loss without needing draw recall
+- **Conditional draw scaling (cond_draw_elo)** — tying the draw boost to match closeness (`1 + 0.4·exp(−|elo_diff|/150)`) beats the flat k=1.2 on the knockout target (BT2) and, unlike the flat multiplier, lifts draw recall off 0% on close games (BT1 20%, BT3 7%). Cost: it withholds the boost from group-stage mismatches that still benefit from it, regressing BT3. Net: better for KO submissions, worse for group stage — the same tension seen in the training-window study
+- **Recency / in-tournament form (wc_recent_form)** — adding last-3-game form, exponentially-weighted form, and a momentum delta (`form3−form10`) improves BT2 (−0.006) and BT3 (−0.002) *together*, the first change to help both the KO target and recent group stage at once. Each feature alone is noise (BT2 +0.004 to +0.006); only the trio interacts usefully inside TabPFN, so keep them as a set. Supports the idea that current physical/mental condition — not just long-run Elo — drives WC outcomes. Mild BT1 cost (+0.004)
 - **Calibration (Step 10)**: eps clipping is a no-op (probabilities never near boundaries); alpha=1.0 is optimal for KO stage (no power scaling needed); only draw_k matters
 
 ---
