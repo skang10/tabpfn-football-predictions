@@ -50,12 +50,15 @@ LLM_DIFF_FEATURES = [
 # BT2 and BT3 together (see sweep_recent_form.py) though each alone is noise.
 RECENCY_FEATURES = ["form3_diff", "ewform_diff", "momentum_diff"]
 
-# Elo momentum: rating change over a team's last 3/5 games. Unlike form3/ewform
+# Elo momentum: rating change over a team's last 5 games. Unlike form3/ewform
 # (points-only), this is opponent-strength- and margin-adjusted, since each Elo
 # delta already bakes in importance * goal-diff-multiplier * (actual - expected).
 # Distinguishes e.g. a narrow win over a strong side from the same scoreline
 # against a weak one. See features.py::build_features.
-MOMENTUM_FEATURES = ["elo_mom3_diff", "elo_mom5_diff"]
+# Ablation (sweep_elo_momentum.py) found mom5 alone beats bundling mom3+mom5 on
+# BT1 and BT2, with negligible BT3 cost — unlike wc_recent_form's form trio,
+# these windows don't need each other, so keep it to the single best one.
+MOMENTUM_FEATURES = ["elo_mom5_diff"]
 FEATURES = BASE_FEATURES + RECENCY_FEATURES + MOMENTUM_FEATURES
 
 # Conditional draw scaling: evenly-matched teams (small |elo_diff|) draw far more
