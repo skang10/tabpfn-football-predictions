@@ -231,23 +231,30 @@ def build_features(df):
     """One chronological pass: every feature uses only matches before kickoff."""
     elo = defaultdict(lambda: 1500.0)
     res = defaultdict(list)
+    elo_hist = defaultdict(list)
     last_date, h2h = {}, defaultdict(list)
 
     def team_feats(team):
         r = res[team]
         if not r:
-            return elo[team], 1.3, 1.3, 0.33, 1.0, 1.0, 0.0, 0.0, 0
+            return elo[team], 1.3, 1.3, 0.33, 1.0, 1.0, 0.0, 0.0, 0, 0.0
         last5, last10 = r[-5:], r[-10:]
         streak = 0
         for p, *_ in reversed(r):
             if p < 1:
                 break
             streak += 1
+        # Elo momentum: rating change over the team's last 5 completed games —
+        # already opponent-strength- and margin-adjusted, since each Elo delta is
+        # importance * g(|goal_diff|) * (actual - expected). Distinguishes a narrow
+        # win over a strong side from the same scoreline against a weak one.
+        eh = elo_hist[team]
+        mom5 = elo[team] - eh[-min(5, len(eh))]
         return (elo[team],
                 np.mean([p for p, *_ in last5]), np.mean([p for p, *_ in last10]),
                 np.mean([w for *_, w in last10]),
                 np.mean([g for _, g, _, _ in last5]), np.mean([a for _, _, a, _ in last5]),
-                np.mean([g - a for _, g, a, _ in last10]), streak, len(r))
+                np.mean([g - a for _, g, a, _ in last10]), streak, len(r), mom5)
 
     def h2h_feats(home, away):
         m = h2h[tuple(sorted((home, away)))]
@@ -262,8 +269,8 @@ def build_features(df):
     rows = []
     for r in df.itertuples():
         h, a, adj = r.home_team, r.away_team, HOME_ADV * (1 - r.neutral)
-        he, hf5, hf10, hwr, hgf, hga, hgd, hstk, hn = team_feats(h)
-        ae, af5, af10, awr, agf, aga, agd, astk, an = team_feats(a)
+        he, hf5, hf10, hwr, hgf, hga, hgd, hstk, hn, hmom5 = team_feats(h)
+        ae, af5, af10, awr, agf, aga, agd, astk, an, amom5 = team_feats(a)
         nm, h2h_wr, h2h_dr, h2h_gd = h2h_feats(h, a)
         elo_d = he + adj - ae
         host_adv, concacaf_adv, same_cont_adv = _wc_context(h, a, r.tournament, r.date.year)
@@ -275,6 +282,7 @@ def build_features(df):
             "home_winrate": hwr, "away_winrate": awr,
             "home_gf5": hgf, "away_gf5": agf, "home_ga5": hga, "away_ga5": aga,
             "gd10_diff": hgd - agd, "home_streak": hstk, "away_streak": astk,
+            "home_elo_mom5": hmom5, "away_elo_mom5": amom5, "elo_mom5_diff": hmom5 - amom5,
             "home_rest": min((r.date - last_date[h]).days, 90) if h in last_date else 30,
             "away_rest": min((r.date - last_date[a]).days, 90) if a in last_date else 30,
             "home_played": hn, "away_played": an,
@@ -291,6 +299,8 @@ def build_features(df):
             # goal-difference multiplier (FIFA-style)
             g = 1.0 if abs(gd) <= 1 else (1.5 if abs(gd) == 2 else (11 + abs(gd)) / 8)
             delta = r.importance * g * (s - exp)
+            elo_hist[h].append(he)
+            elo_hist[a].append(ae)
             elo[h] += delta
             elo[a] -= delta
             res[h].append((3 if gd > 0 else (1 if gd == 0 else 0), r.home_score, r.away_score, gd > 0))

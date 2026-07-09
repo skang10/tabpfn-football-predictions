@@ -44,7 +44,14 @@ LLM_DIFF_FEATURES = [
     "tactical_edge_diff",
 ]
 
-FEATURES = BASE_FEATURES
+# Elo momentum: rating change over a team's last 5 games. Unlike form-based
+# features, this is opponent-strength- and margin-adjusted, since each Elo
+# delta already bakes in importance * goal-diff-multiplier * (actual - expected).
+# Distinguishes e.g. a narrow win over a strong side from the same scoreline
+# against a weak one. See features.py::build_features. Layered directly on the
+# R32-era 20-feature base (this branch), not on wc_recent_form/cond_draw_elo.
+MOMENTUM_FEATURES = ["elo_mom5_diff"]
+FEATURES = BASE_FEATURES + MOMENTUM_FEATURES
 
 
 def _empty_llm_features(index):
@@ -135,7 +142,7 @@ def build_features(df, llm_context=False, llm_context_path=LLM_CONTEXT_PATH):
 
 
 def _model_features(use_llm_context=False):
-    return BASE_FEATURES + LLM_DIFF_FEATURES if use_llm_context else BASE_FEATURES
+    return FEATURES + LLM_DIFF_FEATURES if use_llm_context else FEATURES
 
 
 def train(pool, features=None):
