@@ -8,6 +8,23 @@ a 3-class TabPFN classifier.
 
 ## Submissions
 
+### Quarterfinal (2026-07-09 – 2026-07-11)
+
+**Data:** `results.csv` + `goalscorers.csv` from
+[martj42/international_results](https://github.com/martj42/international_results),
+refreshed at submission time (`--refresh`).
+
+Adds `elo_mom5_diff` — each team's Elo rating change over its last 5 games,
+already opponent-strength- and margin-adjusted since the Elo delta itself is
+`importance × goal-diff multiplier × (actual − expected)` — on top of the
+conditional draw scaling and recency-form features below. Same command picks
+it up automatically:
+
+```bash
+uv sync
+uv run predict.py --refresh --output-dir submissions
+```
+
 ### Round of 16 (2026-07-04 – 2026-07-06)
 
 **Data:** `results.csv` + `goalscorers.csv` from
