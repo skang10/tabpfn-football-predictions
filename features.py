@@ -231,13 +231,14 @@ def build_features(df):
     """One chronological pass: every feature uses only matches before kickoff."""
     elo = defaultdict(lambda: 1500.0)
     res = defaultdict(list)
+    elo_hist = defaultdict(list)
     last_date, h2h = {}, defaultdict(list)
 
     def team_feats(team):
         r = res[team]
         if not r:
-            # elo, form5, form10, winrate10, gf5, ga5, gd10, streak, n, form3, ewform
-            return elo[team], 1.3, 1.3, 0.33, 1.0, 1.0, 0.0, 0.0, 0, 1.3, 1.3
+            # elo, form5, form10, winrate10, gf5, ga5, gd10, streak, n, form3, ewform, mom3, mom5
+            return elo[team], 1.3, 1.3, 0.33, 1.0, 1.0, 0.0, 0.0, 0, 1.3, 1.3, 0.0, 0.0
         last3, last5, last10 = r[-3:], r[-5:], r[-10:]
         streak = 0
         for p, *_ in reversed(r):
@@ -249,12 +250,19 @@ def build_features(df):
         pts10 = [p for p, *_ in last10]
         w = 0.75 ** np.arange(len(pts10))[::-1]
         ewform = float(np.dot(pts10, w) / w.sum())
+        # Elo momentum: rating change over the team's last N completed games —
+        # already opponent-strength- and margin-adjusted, since each Elo delta is
+        # importance * g(|goal_diff|) * (actual - expected). Distinguishes a narrow
+        # win over a strong side from the same scoreline against a weak one.
+        eh = elo_hist[team]
+        mom3 = elo[team] - eh[-min(3, len(eh))]
+        mom5 = elo[team] - eh[-min(5, len(eh))]
         return (elo[team],
                 np.mean([p for p, *_ in last5]), np.mean([p for p, *_ in last10]),
                 np.mean([w for *_, w in last10]),
                 np.mean([g for _, g, _, _ in last5]), np.mean([a for _, _, a, _ in last5]),
                 np.mean([g - a for _, g, a, _ in last10]), streak, len(r),
-                np.mean([p for p, *_ in last3]), ewform)
+                np.mean([p for p, *_ in last3]), ewform, mom3, mom5)
 
     def h2h_feats(home, away):
         m = h2h[tuple(sorted((home, away)))]
@@ -269,8 +277,8 @@ def build_features(df):
     rows = []
     for r in df.itertuples():
         h, a, adj = r.home_team, r.away_team, HOME_ADV * (1 - r.neutral)
-        he, hf5, hf10, hwr, hgf, hga, hgd, hstk, hn, hf3, hew = team_feats(h)
-        ae, af5, af10, awr, agf, aga, agd, astk, an, af3, aew = team_feats(a)
+        he, hf5, hf10, hwr, hgf, hga, hgd, hstk, hn, hf3, hew, hmom3, hmom5 = team_feats(h)
+        ae, af5, af10, awr, agf, aga, agd, astk, an, af3, aew, amom3, amom5 = team_feats(a)
         nm, h2h_wr, h2h_dr, h2h_gd = h2h_feats(h, a)
         elo_d = he + adj - ae
         host_adv, concacaf_adv, same_cont_adv = _wc_context(h, a, r.tournament, r.date.year)
@@ -286,6 +294,8 @@ def build_features(df):
             "home_ewform": hew, "away_ewform": aew, "ewform_diff": hew - aew,
             # momentum: recent (last 3) vs baseline (last 10) — positive = peaking now
             "momentum_diff": (hf3 - hf10) - (af3 - af10),
+            "home_elo_mom3": hmom3, "away_elo_mom3": amom3, "elo_mom3_diff": hmom3 - amom3,
+            "home_elo_mom5": hmom5, "away_elo_mom5": amom5, "elo_mom5_diff": hmom5 - amom5,
             "home_rest": min((r.date - last_date[h]).days, 90) if h in last_date else 30,
             "away_rest": min((r.date - last_date[a]).days, 90) if a in last_date else 30,
             "home_played": hn, "away_played": an,
@@ -302,6 +312,8 @@ def build_features(df):
             # goal-difference multiplier (FIFA-style)
             g = 1.0 if abs(gd) <= 1 else (1.5 if abs(gd) == 2 else (11 + abs(gd)) / 8)
             delta = r.importance * g * (s - exp)
+            elo_hist[h].append(he)
+            elo_hist[a].append(ae)
             elo[h] += delta
             elo[a] -= delta
             res[h].append((3 if gd > 0 else (1 if gd == 0 else 0), r.home_score, r.away_score, gd > 0))
