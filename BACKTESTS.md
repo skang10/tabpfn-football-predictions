@@ -38,6 +38,9 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | llm_context_features | exp/llm_context_features | main | 1.1606 | 0.9062 | 0.9433 | <u>50.0%</u> | 56.2% | 64.6% | 2bf6f95 | +4 cached LLM diff features from `llm_context.csv/jsonl`; no cache present → all zero, matches raw 3-class |
 | draw_2stage | exp_0628/draw_handling | main | 1.1749 | 0.9102 | 0.9282 | <u>50.0%</u> | 56.2% | — | b6aa62d | two-stage: binary draw/not-draw then home/away |
 | draw_3class_k12 ★ | main (via PR #2) | exp_0628/draw_handling | 1.1706 | **0.9020** | 0.9378 | 47.9% | 56.2% | 58.3% | c8483bc | tabpfn_3class + draw_k=1.2 · submit with `--draw-scale 1.2` · BT1 hurt (+0.010), BT2 best, BT3 improved (-0.005) |
+| elo_momentum_r32base ‡ | exp/elo_momentum_r32base | main (8cba72a) | 1.1588 | 0.8993 | 0.9439 | <u>50.0%</u> | 56.2% | <u>64.6%</u> | 3eb42df | +elo_mom5_diff (Elo Δ over last 5 games, opponent-strength- and margin-adjusted) layered directly on the R32-era 20-feature base — **not** on wc_recent_form/cond_draw_elo, per explicit request to branch from the R32 commit instead of main's later state · submit with `--draw-scale 1.2` · also fixes a pre-existing bug where `_model_features()` used `BASE_FEATURES` instead of `FEATURES`, silently dropping any added feature from the actual `predict.py` run |
+
+‡ Computed on the same **refreshed dataset** as the †/†† rows (not the 2026-06-28 snapshot `tw_m3000` used), so not directly comparable to `tw_m3000`'s numbers above. Same-dataset control (20-feature base, no momentum, refreshed data): BT1=1.1610, BT2=0.9094, BT3=0.9453. elo_momentum_r32base improves all three: BT1 −0.0022, BT2 −0.0101, BT3 −0.0014 — smaller BT2 gain than layering the same feature on `wc_recent_form` (elo_momentum_mom5: 0.8950→0.8791, −0.0159), since some of the momentum signal overlaps with the recency features that aren't present in this simpler base.
 
 ### Key observations
 
