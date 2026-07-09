@@ -17,6 +17,11 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 > **Knockout submission**: `uv run predict.py --draw-scale 1.2` → BT2=**0.9020**
 > Source: PR #1 (`tw_m3000`) + PR #2 (`draw_handling`)
 
+> **Quarterfinal submission (2026-07-09 – 2026-07-11)**: elo_momentum_mom5 —
+> `uv run predict.py --refresh --output-dir submissions` on `exp/elo_momentum_ablation`
+> → `submission_exp_elo_momentum_ablation_20260709.csv` · BT2=**0.8791**
+> Source: PR #5 (`elo_momentum`), pending merge to main
+
 ---
 
 ## Experiment log
@@ -41,7 +46,7 @@ Three fixed test sets evaluated with `uv run backtest.py`:
 | cond_draw_elo † | exp/cond_draw_elo | main | 1.1683 | 0.9012 | 0.9512 | 52.1% | 56.2% | 58.3% | 72cfd54 | draw_k = 1 + 0.4·exp(−\|elo_diff\|/150) folded into `predict_proba` · larger draw boost for close games · sweep in `sweep_cond_draw.py` |
 | wc_recent_form † | exp/wc_recent_form | exp/cond_draw_elo | 1.1722 | 0.8950 | 0.9489 | 47.9% | 56.2% | 58.3% | 37dd25b | +form3_diff, ewform_diff, momentum_diff → 23 features on top of cond_draw_elo · in-tournament condition/momentum · trio improves BT2 **and** BT3 together, each feature alone is noise · ablation in `sweep_recent_form.py` |
 | elo_momentum †† | exp/elo_momentum | exp/wc_recent_form | 1.1714 | 0.8805 | 0.9466 | <u>50.0%</u> | 56.2% | 56.2% | 2787fe7 | +elo_mom3_diff, elo_mom5_diff (Elo Δ over last 3/5 games — already opponent-strength- and margin-adjusted, unlike points-only form3/ewform) → 25 features on top of wc_recent_form · improves **all three** BTs · motivated by Norway 2-1 Brazil vs. Argentina 3-2 Egypt, same +1 GD but very different difficulty · superseded by elo_momentum_mom5 below |
-| elo_momentum_mom5 †† | exp/elo_momentum_ablation | exp/elo_momentum | 1.1694 | **0.8791** | 0.9478 | 47.9% | 56.2% | 58.3% | cd896f4 | ablation (`sweep_elo_momentum.py`) found elo_mom5_diff **alone** beats bundling mom3+mom5 on BT1 and BT2, negligible BT3 cost → 24 features · unlike wc_recent_form's form trio, momentum windows don't need each other · new best BT2 in the TabPFN pipeline · also recovers BT3 accuracy to 58.3% (bundled version had dropped it to 56.2%) |
+| elo_momentum_mom5 †† | exp/elo_momentum_ablation | exp/elo_momentum | 1.1694 | **0.8791** | 0.9478 | 47.9% | 56.2% | 58.3% | cd896f4 | ablation (`sweep_elo_momentum.py`) found elo_mom5_diff **alone** beats bundling mom3+mom5 on BT1 and BT2, negligible BT3 cost → 24 features · unlike wc_recent_form's form trio, momentum windows don't need each other · new best BT2 in the TabPFN pipeline · also recovers BT3 accuracy to 58.3% (bundled version had dropped it to 56.2%) · **used for the Quarterfinal (2026-07-09–11) submission** via PR #5, not yet merged to main |
 
 † Computed on the **refreshed dataset** (latest game 2026-07-06), not the 2026-06-28 snapshot used by every row above — cross-row log-loss is *not* directly comparable; the two † rows *are* comparable to each other (same data). Same-data comparison (from `sweep_cond_draw.py`): cond_draw_elo **beats flat draw_k=1.2 on BT2 (0.9012 vs 0.9052) and BT1 (1.1683 vs 1.1711)** but **regresses BT3 (0.9512 vs 0.9395)**; BT2-optimal (b=0.8, s=100) reaches 0.9003 but overfits 16 KO matches and wrecks BT3 (0.9576), so balanced b=0.4 is baked in. wc_recent_form builds on cond_draw_elo and improves both BT2 (0.9012→0.8950) and BT3 (0.9512→0.9489).
 
