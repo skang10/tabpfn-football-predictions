@@ -231,6 +231,12 @@ def main():
     parser.add_argument("--refresh",    action="store_true", help="Re-download dataset")
     parser.add_argument("--date",       default=None,
                         help="Predict fixtures on or after this date (YYYY-MM-DD). Defaults to today.")
+    parser.add_argument("--as-of",      default=None,
+                        help="Reconstruct predictions as if run on this date (YYYY-MM-DD): caps "
+                             "the training pool to matches strictly before it, and predicts every "
+                             "fixture on/after it as if still unplayed, even if a result has since "
+                             "been recorded (overrides --date and the usual unplayed-only filter). "
+                             "For retroactively validating blind pre-round predictions.")
     parser.add_argument("--draw-scale", type=float, default=1.0,
                         help="Extra flat multiplier on p_draw, then renormalize (default 1.0 = "
                              "none). Conditional draw scaling is already baked into predict_proba; "
@@ -251,9 +257,14 @@ def main():
     df    = load_data(refresh=args.refresh)
     feats = build_features(df, llm_context=args.llm_context, llm_context_path=args.llm_context_path)
     model_features = _model_features(args.llm_context)
-    played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
     # Keep the fixture order from results.csv/load_data instead of re-sorting here.
-    future = feats[feats["home_score"].isna() & (feats["date"] >= from_date)]
+    if args.as_of:
+        as_of  = pd.Timestamp(args.as_of)
+        played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START) & (feats["date"] < as_of)]
+        future = feats[feats["date"] >= as_of]
+    else:
+        played = feats[feats["outcome"].notna() & (feats["date"] >= TRAIN_START)]
+        future = feats[feats["home_score"].isna() & (feats["date"] >= from_date)]
 
     if not len(future):
         print("No upcoming fixtures — run with --refresh to fetch latest data.")
