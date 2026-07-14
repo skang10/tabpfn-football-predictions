@@ -8,6 +8,17 @@ a 3-class TabPFN classifier.
 
 ## Submissions
 
+### Semifinal (2026-07-14 – 2026-07-15)
+
+**Data:** `results.csv` + `goalscorers.csv` from
+[martj42/international_results](https://github.com/martj42/international_results),
+refreshed at submission time (`--refresh`).
+
+```bash
+uv sync
+uv run predict.py --refresh --output-dir submissions
+```
+
 ### Quarterfinal blind check (pre-2026-07-09)
 
 **Data:** `results.csv` + `goalscorers.csv` from
