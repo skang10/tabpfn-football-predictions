@@ -8,6 +8,25 @@ a 3-class TabPFN classifier.
 
 ## Submissions
 
+### Quarterfinal blind check (pre-2026-07-09)
+
+**Data:** `results.csv` + `goalscorers.csv` from
+[martj42/international_results](https://github.com/martj42/international_results),
+refreshed at submission time (`--refresh`).
+
+Retroactively reconstructs what the model would have predicted for all four
+Quarterfinal matches (including France vs Morocco) using only data available
+before 2026-07-09 — useful for validating a call after the fact without the
+result leaking into training. `--as-of` caps the training pool to matches
+strictly before the given date and treats every fixture on/after it as still
+unplayed, even once a real result has since been recorded (`--date` alone
+can't do this, since it only filters *which* unplayed fixtures to output):
+
+```bash
+uv sync
+uv run predict.py --refresh --as-of 2026-07-09 --output-dir submissions
+```
+
 ### Round of 16 (2026-07-04 – 2026-07-06)
 
 **Data:** `results.csv` + `goalscorers.csv` from
