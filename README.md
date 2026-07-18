@@ -8,6 +8,22 @@ a 3-class TabPFN classifier.
 
 ## Submissions
 
+### Third-place playoff (2026-07-18)
+
+**Data:** `results.csv` + `goalscorers.csv` from
+[martj42/international_results](https://github.com/martj42/international_results),
+refreshed at submission time (`--refresh`).
+
+Only the third-place match (France vs England) is submitted this round. The
+Final (Spain vs Argentina, 2026-07-19) was evaluated with an LLM-context
+variant (`--llm-context`, cached pre-match team news in `llm_context.csv`)
+but that submission was not used — the plain model output was preferred:
+
+```bash
+uv sync
+uv run predict.py --refresh --output-dir submissions
+```
+
 ### Semifinal (2026-07-14 – 2026-07-15)
 
 **Data:** `results.csv` + `goalscorers.csv` from
